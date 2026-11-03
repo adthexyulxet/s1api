@@ -56,6 +56,8 @@ SUSPICIOUS_PROCESSES: Dict[str, Rule] = {
     "psexesvc": Rule("측면 이동", "T1569.002", 3),
 }
 
+BENIGN_WHEN_PARENT: Dict[str, Set[str]] = {"sshd": {"systemd", "init", "launchd"}}
+
 # 명령줄 패턴 (프로세스 이름과 무관하게 탐지)
 CMDLINE_PATTERNS: List[Tuple[re.Pattern, Rule]] = [
     (re.compile(r"\s-(e|en|enc|enco|encodedcommand)\s+[A-Za-z0-9+/=]{16,}", re.I), Rule("인코딩된 PowerShell 명령", "T1027", 3)),
@@ -111,6 +113,7 @@ class AnalysisResult:
     findings: List[Finding]
     iocs: Iocs
     event_types: Dict[str, int]
+    behavior: Any = None  # behavior.BehaviorAnalysis
 
 
 def first_of(event: Dict[str, Any], keys: Iterable[str]) -> Optional[str]:
@@ -204,7 +207,11 @@ def detect(event: Dict[str, Any]) -> List[Finding]:
         created_at=first_of(event, ("createdAt", "eventTime")),
     )
     found: List[Finding] = []
-    rule = SUSPICIOUS_PROCESSES.get(normalize_process_name(process))
+    pname = normalize_process_name(process)
+    rule = SUSPICIOUS_PROCESSES.get(pname)
+    # systemd/init 가 띄운 sshd 데몬 자체는 정상 서비스이므로 제외
+    if rule and pname in BENIGN_WHEN_PARENT and normalize_process_name(common["parent"]) in BENIGN_WHEN_PARENT[pname]:
+        rule = None
     if rule:
         found.append(Finding(rule.category, rule.technique, rule.weight, **common))
     if cmdline:
@@ -228,4 +235,6 @@ def analyze_events(events: List[Dict[str, Any]]) -> AnalysisResult:
             seen.add(key)
             findings.append(f)
     findings.sort(key=lambda f: f.weight, reverse=True)
-    return AnalysisResult(len(events), findings, extract_iocs(events), event_types)
+    from .behavior import analyze_behavior  # 순환 import 방지
+
+    return AnalysisResult(len(events), findings, extract_iocs(events), event_types, analyze_behavior(events))

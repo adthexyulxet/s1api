@@ -19,6 +19,7 @@ class TriageReport:
     analysis: Optional[AnalysisResult]
     ti: List[TiVerdict] = field(default_factory=list)
     error: Optional[str] = None
+    raw_events: Optional[List[Dict[str, Any]]] = None
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @property
@@ -26,6 +27,8 @@ class TriageReport:
         s = 0
         if self.analysis:
             s += min(10, sum(f.weight for f in self.analysis.findings))
+            if self.analysis.behavior:
+                s += min(10, self.analysis.behavior.score)
         s += 5 * sum(1 for v in self.ti if v.malicious)
         if (self.threat.confidence_level or "").lower() == "malicious":
             s += 3
@@ -60,9 +63,11 @@ class TriageReport:
                 "event_types": self.analysis.event_types,
                 "findings": [f.to_dict() for f in self.analysis.findings],
                 "iocs": self.analysis.iocs.to_dict(),
+                "behavior": self.analysis.behavior.to_dict() if self.analysis.behavior else None,
             },
             "threat_intel": [v.to_dict() for v in self.ti],
             "error": self.error,
+            **({"raw_events": self.raw_events} if self.raw_events is not None else {}),
         }
 
     def save(self, directory: str) -> Path:
@@ -80,6 +85,31 @@ def _short(text: Optional[str], n: int = 160) -> str:
     return text if len(text) <= n else text[: n - 3] + "..."
 
 
+CONSOLE_TIMELINE_LIMIT = 15
+
+
+def format_behavior(b) -> List[str]:
+    lines = ["", "    [행위 분석]"]
+    lines += [f"    · {s}" for s in b.summary]
+    if b.highlights:
+        lines.append("    주목할 행위 설명:")
+        for tag, examples in b.highlights:
+            lines.append(f"      ▶ {tag.name} [{tag.technique}]")
+            lines.append(f"        의미: {tag.meaning}")
+            for ex in examples:
+                lines.append(f"        근거: {_short(ex, 150)}")
+    lines.append("    행위 타임라인 (시간순, 같은 행위는 묶음):")
+    for item in b.timeline[:CONSOLE_TIMELINE_LIMIT]:
+        t = (item.time or "")[11:19] or "--:--:--"
+        cnt = f" ×{item.count}" if item.count > 1 else ""
+        mark = " ⚠" if item.tags else ""
+        lines.append(f"      {t}  {_short(item.sentence, 150)}{cnt}{mark}")
+    if len(b.timeline) > CONSOLE_TIMELINE_LIMIT:
+        lines.append(f"      ... 외 {len(b.timeline) - CONSOLE_TIMELINE_LIMIT}건 (JSON 리포트 참고)")
+    lines.append("")
+    return lines
+
+
 def format_report(r: TriageReport) -> str:
     t = r.threat
     lines = [
@@ -95,6 +125,8 @@ def format_report(r: TriageReport) -> str:
     if a is not None:
         types = ", ".join(f"{k} {v}" for k, v in sorted(a.event_types.items(), key=lambda kv: -kv[1])[:6])
         lines.append(f"    DV 이벤트: {a.event_count}개 ({types or '-'})")
+        if a.behavior and a.event_count:
+            lines.extend(format_behavior(a.behavior))
         if a.findings:
             lines.append(f"    의심 행위 {len(a.findings)}건:")
             for f in a.findings[:20]:

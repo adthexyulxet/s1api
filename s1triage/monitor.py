@@ -53,6 +53,8 @@ class TriagePipeline:
                 analysis = analyze_events(events)
                 ti = self.enricher.enrich(analysis.iocs) if self.enricher.enabled else []
                 report = TriageReport(threat, analysis, ti)
+                if self.settings.report_raw_events:
+                    report.raw_events = events
             except S1ApiError as exc:
                 report = TriageReport(threat, None, error=str(exc))
 

@@ -68,6 +68,7 @@ class Settings:
     abuseipdb_api_key: str = ""
     enrich_max_lookups: int = 10
     report_dir: str = ""
+    report_raw_events: bool = False
 
     def __repr__(self) -> str:  # 토큰이 로그에 찍히지 않도록 마스킹
         return (
@@ -113,4 +114,5 @@ class Settings:
             abuseipdb_api_key=(env.get("ABUSEIPDB_API_KEY") or "").strip(),
             enrich_max_lookups=_int(env, "ENRICH_MAX_LOOKUPS", cls.enrich_max_lookups),
             report_dir=(env.get("REPORT_DIR") or "").strip(),
+            report_raw_events=(env.get("REPORT_RAW_EVENTS") or "").strip().lower() in {"1", "true", "yes", "on"},
         )
