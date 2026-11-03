@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,8 @@ log = logging.getLogger(__name__)
 
 S1_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.000Z"
 DV_EVENTS_PAGE_SIZE = 1000  # /dv/events 의 페이지당 최대 건수
+RATE_LIMIT_BASE_WAIT = 15  # 429 응답에 Retry-After 가 없을 때 첫 대기(초), 이후 2배씩
+RATE_LIMIT_MAX_WAIT = 120
 
 
 class S1ApiError(RuntimeError):
@@ -76,7 +79,7 @@ def build_session(settings: Settings) -> requests.Session:
     retry = Retry(
         total=settings.http_retries,
         backoff_factor=1.0,
-        status_forcelist=(429, 500, 502, 503, 504),
+        status_forcelist=(500, 502, 503, 504),  # 429 는 S1Client 에서 더 길게 대기하며 처리
         allowed_methods=frozenset({"GET", "POST"}),
         respect_retry_after_header=True,
         raise_on_status=False,
@@ -105,18 +108,43 @@ class S1Client:
         self.session = session or build_session(settings)
         self._sleep = sleep
         self._now = now
+        self._clock = time.monotonic
+        self._last_dv_init: Optional[float] = None
 
     # ------------------------------------------------------------------ HTTP
+    @staticmethod
+    def _retry_after(resp: Any, attempt: int) -> float:
+        headers = getattr(resp, "headers", None) or {}
+        try:
+            value = float(headers.get("Retry-After", ""))
+            if value > 0:
+                return min(value, RATE_LIMIT_MAX_WAIT)
+        except (TypeError, ValueError):
+            pass
+        return min(RATE_LIMIT_BASE_WAIT * (2 ** attempt), RATE_LIMIT_MAX_WAIT)
+
     def _request(self, method: str, path: str, **kwargs) -> Dict[str, Any]:
         url = f"{self.base}{path}"
         kwargs.setdefault("timeout", self.settings.http_timeout)
-        try:
-            resp = self.session.request(method, url, **kwargs)
-        except requests.RequestException as exc:
-            raise S1ApiError(f"{method} {path} 요청 실패: {exc}") from exc
+        attempt = 0
+        while True:
+            try:
+                resp = self.session.request(method, url, **kwargs)
+            except requests.RequestException as exc:
+                raise S1ApiError(f"{method} {path} 요청 실패: {exc}") from exc
+            if resp.status_code == 429 and attempt < self.settings.rate_limit_retries:
+                wait = self._retry_after(resp, attempt)
+                log.warning("%s %s -> 429 요청 과다, %.0f초 후 재시도 (%d/%d)",
+                            method, path, wait, attempt + 1, self.settings.rate_limit_retries)
+                self._sleep(wait)
+                attempt += 1
+                continue
+            break
         if resp.status_code != 200:
-            body = (resp.text or "")[:500]
-            raise S1ApiError(f"{method} {path} -> {resp.status_code}: {body}", resp.status_code)
+            text = resp.text or ""
+            if "<html" in text.lower():  # nginx 에러 페이지 등은 태그를 지우고 요약
+                text = " ".join(re.sub(r"<[^>]+>", " ", text).split())
+            raise S1ApiError(f"{method} {path} -> {resp.status_code}: {text[:300]}", resp.status_code)
         try:
             return resp.json()
         except ValueError as exc:
@@ -153,7 +181,16 @@ class S1Client:
         safe = str(storyline_id).replace("\\", "\\\\").replace('"', '\\"')
         return self.settings.dv_query_template.format(storyline_id=safe)
 
+    def _throttle_dv(self) -> None:
+        """DV 쿼리는 레이트리밋이 엄격해서 연속 생성 사이에 최소 간격을 둡니다."""
+        if self._last_dv_init is not None:
+            gap = self.settings.dv_min_interval - (self._clock() - self._last_dv_init)
+            if gap > 0:
+                self._sleep(gap)
+        self._last_dv_init = self._clock()
+
     def init_dv_query(self, query: str, from_date: datetime, to_date: datetime) -> str:
+        self._throttle_dv()
         payload = {
             "query": query,
             "fromDate": from_date.strftime(S1_TIME_FORMAT),

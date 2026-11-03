@@ -76,3 +76,13 @@ def test_skip_backlog(settings, fixed_now):
     p, _, _ = make_pipeline(settings, routes, fixed_now)
     assert p.mark_backlog_seen() == 2
     assert p.poll_once() == []
+
+
+def test_zero_events_message(settings, fixed_now):
+    routes = {("GET", "/threats"): FakeResponse(200, {"data": [threat_payload("5")]})}
+    routes.update(dv_routes([]))
+    p, _, out = make_pipeline(settings, routes, fixed_now)
+    p.poll_once()
+    text = "\n".join(out)
+    assert "DV 이벤트를 찾지 못했습니다" in text
+    assert "수집된 이벤트는 있으나" not in text

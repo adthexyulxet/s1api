@@ -51,7 +51,9 @@ python -m s1triage --threat-id 1234567890   # 특정 위협 1건만 분석
 | `S1_DV_QUERY_TEMPLATE` | `storyline = "{storyline_id}"` | S1QL 템플릿 |
 | `S1_DV_POLL_SECONDS` / `S1_DV_TIMEOUT_SECONDS` | 3 / 90 | 쿼리 상태 확인 간격 / 최대 대기 |
 | `S1_DV_MAX_EVENTS` | 5000 | 위협당 수집할 최대 이벤트 수 |
-| `S1_HTTP_TIMEOUT` / `S1_HTTP_RETRIES` | 30 / 3 | HTTP 타임아웃, 429·5xx 재시도 횟수 (Retry-After 준수) |
+| `S1_HTTP_TIMEOUT` / `S1_HTTP_RETRIES` | 30 / 3 | HTTP 타임아웃, 5xx 재시도 횟수 |
+| `S1_RATE_LIMIT_RETRIES` | 4 | 429 응답 시 재시도 횟수 (Retry-After 준수, 없으면 15→30→60→120초 대기) |
+| `S1_DV_MIN_INTERVAL` | 10 | DV 쿼리 연속 생성 시 최소 간격(초) |
 | `VT_API_KEY` | (선택) | VirusTotal v3 키: 해시·IP·도메인 조회 |
 | `ABUSEIPDB_API_KEY` | (선택) | AbuseIPDB 키: IP 평판 조회 |
 | `ENRICH_MAX_LOOKUPS` | 10 | 위협 1건당 TI 조회 상한 (무료 쿼터 보호) |
@@ -64,7 +66,7 @@ python -m s1triage --threat-id 1234567890   # 특정 위협 1건만 분석
 - **DV 결과 페이지네이션**: `/dv/events` 의 `nextCursor` 를 따라 전체 결과를 수집(상한 `S1_DV_MAX_EVENTS`). 기존에는 첫 페이지만 가져왔습니다.
 - **조회 범위**: "현재 − 24시간" 고정 → "위협 생성 시각 − 24시간 ~ 현재". 오래된 위협도 빠짐없이 조회합니다.
 - **쿼리 상태**: `isFinished` 외에 `responseState`(FINISHED/FAILED 등)도 확인해 실패 시 즉시 중단.
-- **재시도/레이트리밋**: 429·5xx 에 지수 백오프 재시도, 모든 요청에 타임아웃.
+- **재시도/레이트리밋**: 5xx 지수 백오프 재시도, 429 는 더 길게 대기 후 재시도, DV 쿼리 사이 최소 간격, 모든 요청에 타임아웃.
 - **LOLBin 오탐 수정**: 부분 문자열 매칭(`"nc" in name`) 때문에 `sync.exe`, `vncviewer.exe`, `cmdagent.exe` 등이 탐지되던 문제를, 경로·확장자를 제거한 프로세스 이름 **정확 일치**로 수정. 탐지 목록 확장 및 MITRE ATT&CK 기법 ID·가중치 부여.
 - **명령줄 패턴 탐지**: 인코딩된 PowerShell, `IEX + DownloadString`, `certutil -urlcache`, `vssadmin delete shadows`, 숨김 창 실행.
 - **IOC 추출**: 공인 IP(사설·예약 대역 제외), 도메인(DNS·URL·명령줄 내 URL), SHA1/SHA256/MD5.

@@ -90,3 +90,48 @@ def test_dv_query_failed_and_timeout(settings, fixed_now):
 def test_query_escapes_quotes(settings, fixed_now):
     client, _ = make_client(settings, {}, fixed_now)
     assert client.build_storyline_query('a"b') == 'storyline = "a\\"b"'
+
+
+def test_429_waits_and_retries(settings, fixed_now):
+    session = FakeSession({
+        ("POST", "/dv/init-query"): [
+            FakeResponse(429, {}),
+            FakeResponse(429, {}),
+            FakeResponse(200, {"data": {"queryId": "q1"}}),
+        ],
+    })
+    sleeps = []
+    client = S1Client(settings, session=session, sleep=sleeps.append, now=fixed_now)
+    assert client.init_dv_query("x", fixed_now(), fixed_now()) == "q1"
+    assert sleeps == [15, 30]
+
+
+def test_429_gives_up_after_retries_and_strips_html(settings, fixed_now):
+    from dataclasses import replace
+    s = replace(settings, rate_limit_retries=1)
+    resp = FakeResponse(429, {})
+    resp.text = "<html><head><title>429 Too Many Requests</title></head><body>nginx</body></html>"
+    client = S1Client(s, session=FakeSession({("GET", "/threats"): resp}), sleep=lambda x: None, now=fixed_now)
+    with pytest.raises(S1ApiError) as exc:
+        client.get_unresolved_threats()
+    assert exc.value.status_code == 429
+    assert "<html>" not in str(exc.value) and "429 Too Many Requests" in str(exc.value)
+
+
+def test_retry_after_header_respected(settings, fixed_now):
+    resp = FakeResponse(429, {})
+    resp.headers = {"Retry-After": "7"}
+    assert S1Client._retry_after(resp, 0) == 7
+    assert S1Client._retry_after(FakeResponse(429, {}), 5) == 120
+
+
+def test_dv_queries_are_spaced(settings, fixed_now):
+    session = FakeSession({("POST", "/dv/init-query"): FakeResponse(200, {"data": {"queryId": "q"}})})
+    sleeps = []
+    client = S1Client(settings, session=session, sleep=sleeps.append, now=fixed_now)
+    t = [100.0]
+    client._clock = lambda: t[0]
+    client.init_dv_query("a", fixed_now(), fixed_now())
+    t[0] += 3
+    client.init_dv_query("b", fixed_now(), fixed_now())
+    assert sleeps == [settings.dv_min_interval - 3]

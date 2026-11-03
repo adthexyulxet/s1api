@@ -62,6 +62,8 @@ class Settings:
     dv_max_events: int = 5000
     http_timeout: int = 30
     http_retries: int = 3
+    rate_limit_retries: int = 4
+    dv_min_interval: int = 10
     vt_api_key: str = ""
     abuseipdb_api_key: str = ""
     enrich_max_lookups: int = 10
@@ -105,6 +107,8 @@ class Settings:
             dv_max_events=_int(env, "S1_DV_MAX_EVENTS", cls.dv_max_events),
             http_timeout=_int(env, "S1_HTTP_TIMEOUT", cls.http_timeout),
             http_retries=_int(env, "S1_HTTP_RETRIES", cls.http_retries),
+            rate_limit_retries=_int(env, "S1_RATE_LIMIT_RETRIES", cls.rate_limit_retries),
+            dv_min_interval=_int(env, "S1_DV_MIN_INTERVAL", cls.dv_min_interval),
             vt_api_key=(env.get("VT_API_KEY") or "").strip(),
             abuseipdb_api_key=(env.get("ABUSEIPDB_API_KEY") or "").strip(),
             enrich_max_lookups=_int(env, "ENRICH_MAX_LOOKUPS", cls.enrich_max_lookups),

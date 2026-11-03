@@ -104,8 +104,10 @@ def format_report(r: TriageReport) -> str:
                 lines.append(f"        SHA1: {f.sha1 or '-'}")
             if len(a.findings) > 20:
                 lines.append(f"      ... 외 {len(a.findings) - 20}건 (JSON 리포트 참고)")
-        else:
+        elif a.event_count:
             lines.append("    - 수집된 이벤트는 있으나 지정된 의심 패턴과 일치하는 항목이 없습니다.")
+        else:
+            lines.append("    - 조회 범위에서 이 Storyline 의 DV 이벤트를 찾지 못했습니다. (인덱싱 지연이면 나중에 --threat-id 로 다시 조회해 보세요)")
         i = a.iocs
         lines.append(
             f"    IOC: 외부 IP {len(i.ips)} / 도메인 {len(i.domains)} / SHA1 {len(i.sha1)} / SHA256 {len(i.sha256)}"
