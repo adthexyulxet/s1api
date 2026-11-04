@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import os
 import logging
 import sys
 import time
@@ -16,6 +18,12 @@ from .report import TriageReport, format_report
 from .state import SeenThreats
 
 log = logging.getLogger("s1triage")
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 class TriagePipeline:
@@ -32,6 +40,8 @@ class TriagePipeline:
         self.enricher = enricher or Enricher(settings)
         self.seen = seen if seen is not None else SeenThreats(settings.state_file)
         self.out = out
+        self.status = {"started_at": None, "last_poll_at": None, "last_error": None,
+                       "polls": 0, "analyzed": 0}
 
     def triage(self, threat: Threat) -> TriageReport:
         out = self.out
@@ -86,12 +96,19 @@ class TriagePipeline:
 
     def run_forever(self, sleep: Callable[[float], None] = time.sleep) -> None:
         self.out("[*] SentinelOne 실시간 위협 모니터링 및 DV 분석 데몬 시작... (종료: Ctrl + C)\n")
+        self.status["started_at"] = _now_iso()
         while True:
             try:
-                if self.poll_once():
+                reports = self.poll_once()
+                self.status["last_error"] = None
+                self.status["analyzed"] += len(reports)
+                if reports:
                     self.out("\n[+] 다음 신규 위협 대기 중...\n" + "=" * 65)
             except S1ApiError as exc:
                 log.error("위협 목록 조회 실패: %s", exc)
+                self.status["last_error"] = str(exc)
+            self.status["polls"] += 1
+            self.status["last_poll_at"] = _now_iso()
             sleep(self.settings.poll_interval)
 
 
@@ -101,6 +118,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--once", action="store_true", help="한 번만 폴링하고 종료")
     parser.add_argument("--threat-id", help="특정 위협 ID 하나만 분석하고 종료")
     parser.add_argument("--skip-backlog", action="store_true", help="시작 시점의 기존 미해결 위협은 분석하지 않고 건너뜀")
+    parser.add_argument("--web", action="store_true", help="모니터링을 실행하면서 웹 화면도 함께 띄움")
+    parser.add_argument("--web-only", action="store_true", help="모니터링 없이 저장된 리포트만 웹 화면으로 보기 (토큰 불필요)")
+    parser.add_argument("--port", type=int, default=None, help="웹 화면 포트 (기본: WEB_PORT 또는 8080)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -109,6 +129,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     load_dotenv(args.env_file)
+    if args.web_only:
+        from .web import serve
+
+        try:
+            serve(os.environ.get("REPORT_DIR") or "reports", port=args.port)
+        except KeyboardInterrupt:
+            print("\n[*] 웹 화면을 종료했습니다.")
+        except OSError as exc:
+            print(f"[-] 웹 서버를 시작하지 못했습니다 (포트가 사용 중이면 --port 로 바꾸세요): {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         settings = Settings.from_env()
     except ConfigError as exc:
@@ -130,10 +161,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.once:
             pipeline.poll_once()
             return 0
+        if args.web:
+            import threading
+
+            from .web import serve
+
+            if not settings.report_dir:  # 웹 화면은 저장된 JSON 리포트를 읽으므로 저장을 켬
+                pipeline.settings = settings = dataclasses.replace(settings, report_dir="reports")
+            threading.Thread(target=pipeline.run_forever, name="monitor", daemon=True).start()
+            serve(settings.report_dir, port=args.port, status=pipeline.status)
+            return 0
         pipeline.run_forever()
     except KeyboardInterrupt:
         print("\n[*] 사용자에 의해 모니터링 프로그램이 종료되었습니다.")
     except S1ApiError as exc:
         print(f"[-] API 오류: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"[-] 웹 서버를 시작하지 못했습니다 (포트가 사용 중이면 --port 로 바꾸세요): {exc}", file=sys.stderr)
         return 1
     return 0

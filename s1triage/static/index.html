@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S1 DV 트리아지</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e4e7ec;
+    --accent: #5b4bdb; --sel: #eeebff;
+    --high: #c8322f; --high-bg: #fdecec; --med: #b26a00; --med-bg: #fff4e0; --low: #2e7d4f; --low-bg: #e8f5ee;
+    --err: #8a5300; --code: #f2f4f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141a; --panel: #1a1d25; --text: #e6e8ee; --muted: #98a2b3; --line: #2b2f3a;
+      --accent: #9d93ff; --sel: #262340;
+      --high: #ff7b72; --high-bg: #3a1d1d; --med: #f0b35a; --med-bg: #3a2c14; --low: #6fcf97; --low-bg: #16301f;
+      --err: #f0b35a; --code: #222632;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  #status { color: var(--muted); font-size: 12px; }
+  #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  #status.ok .dot { background: var(--low); } #status.bad .dot { background: var(--high); }
+  main { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; height: calc(100vh - 53px); }
+  #listPane { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .filters { padding: 12px; display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); }
+  .filters input { flex: 1 1 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+                   background: var(--panel); color: var(--text); font: inherit; }
+  .chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px;
+          padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #list { overflow-y: auto; flex: 1; }
+  .item { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--sel); } .item.sel { background: var(--sel); box-shadow: inset 3px 0 var(--accent); }
+  .item .top { display: flex; gap: 8px; align-items: center; }
+  .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .item .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .item .tags { margin-top: 4px; font-size: 12px; color: var(--high); }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; white-space: nowrap; }
+  .HIGH { color: var(--high); background: var(--high-bg); } .MEDIUM { color: var(--med); background: var(--med-bg); }
+  .LOW { color: var(--low); background: var(--low-bg); }
+  #detail { overflow-y: auto; padding: 20px 28px 48px; min-width: 0; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  h2 { font-size: 20px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h3 { font-size: 14px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 13px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-all; }
+  .summary li { margin: 3px 0; }
+  .hl { border: 1px solid var(--line); border-left: 4px solid var(--high); border-radius: 6px;
+        background: var(--panel); padding: 10px 14px; margin-bottom: 10px; }
+  .hl .t { font-weight: 700; } .hl .tech { color: var(--muted); font-size: 12px; margin-left: 6px; font-weight: 400; }
+  .hl .m { margin: 4px 0; }
+  .hl .ev { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+            padding: 3px 8px; border-radius: 4px; margin-top: 4px; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.time { white-space: nowrap; color: var(--muted); font-family: Consolas, ui-monospace, monospace; font-size: 12px; }
+  td.desc { word-break: break-all; }
+  tr.risky td.desc { color: var(--high); font-weight: 600; }
+  .cnt { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .ioc { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ioc span { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+              padding: 2px 8px; border-radius: 4px; word-break: break-all; }
+  .error { color: var(--err); background: var(--med-bg); padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    #listPane { border-right: 0; max-height: 45vh; border-bottom: 1px solid var(--line); }
+    #detail { padding: 16px; }
+    header { padding: 10px 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>SentinelOne DV 트리아지</h1>
+  <div id="status"><span class="dot"></span><span id="statusText">불러오는 중…</span></div>
+</header>
+<main>
+  <section id="listPane">
+    <div class="filters">
+      <input id="q" type="search" placeholder="위협 이름, 호스트, ID 검색">
+      <button class="chip on" data-level="ALL">전체</button>
+      <button class="chip" data-level="HIGH">HIGH</button>
+      <button class="chip" data-level="MEDIUM">MEDIUM</button>
+      <button class="chip" data-level="LOW">LOW</button>
+    </div>
+    <div id="list"></div>
+  </section>
+  <section id="detail"><div class="empty">왼쪽에서 위협을 선택하세요.</div></section>
+</main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+let reports = [], selected = null, level = "ALL";
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k === "onclick") n.onclick = v; else n.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false)
+    n.append(c instanceof Node ? c : String(c));
+  return n;
+}
+function fmtTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("ko-KR", { hour12: false });
+}
+function badge(risk) {
+  const lv = (risk && risk.level) || "LOW";
+  return el("span", { class: "badge " + lv }, lv + (risk && risk.score !== undefined ? " " + risk.score : ""));
+}
+
+async function loadStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const box = $("#status");
+    if (!s.monitoring) {
+      box.className = ""; $("#statusText").textContent = "보기 전용 (모니터링 꺼짐) · " + s.report_dir;
+    } else if (s.last_error) {
+      box.className = "bad"; $("#statusText").textContent = "조회 오류: " + s.last_error.slice(0, 80);
+    } else {
+      box.className = "ok";
+      $("#statusText").textContent = "모니터링 중 · 마지막 조회 " + fmtTime(s.last_poll_at) + " · 분석 " + s.analyzed + "건";
+    }
+  } catch (e) { $("#status").className = "bad"; $("#statusText").textContent = "서버에 연결할 수 없습니다"; }
+}
+
+async function loadList() {
+  try { reports = await (await fetch("/api/reports")).json(); } catch (e) { return; }
+  renderList();
+  if (!selected && reports.length && window.innerWidth > 760) select(reports[0].id);
+}
+
+function renderList() {
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = reports.filter(r =>
+    (level === "ALL" || (r.risk && r.risk.level) === level) &&
+    (!q || [r.name, r.agent_name, r.id].some(v => (v || "").toLowerCase().includes(q))));
+  const list = $("#list");
+  list.replaceChildren();
+  if (!rows.length) {
+    list.append(el("div", { class: "empty" }, reports.length ? "조건에 맞는 위협이 없습니다." :
+      "아직 저장된 리포트가 없습니다. 모니터링이 위협을 분석하면 여기에 나타납니다."));
+    return;
+  }
+  for (const r of rows) {
+    list.append(el("div", { class: "item" + (r.id === selected ? " sel" : ""), onclick: () => select(r.id) },
+      el("div", { class: "top" }, badge(r.risk), el("span", { class: "name" }, r.name || "(이름 없음)")),
+      el("div", { class: "meta" }, (r.agent_name || "-") + " · " + fmtTime(r.created_at) +
+        (r.event_count !== null && r.event_count !== undefined ? " · 이벤트 " + r.event_count : "")),
+      r.highlights && r.highlights.length ? el("div", { class: "tags" }, "⚠ " + r.highlights.slice(0, 3).join(", ")) : null,
+      r.error ? el("div", { class: "tags" }, "오류: " + r.error.slice(0, 60)) : null));
+  }
+}
+
+async function select(id) {
+  selected = id; renderList();
+  const res = await fetch("/api/reports/" + encodeURIComponent(id));
+  if (!res.ok) { $("#detail").replaceChildren(el("div", { class: "empty" }, "리포트를 불러오지 못했습니다.")); return; }
+  renderDetail(await res.json());
+  if (window.innerWidth <= 760) $("#detail").scrollIntoView({ behavior: "smooth" });
+}
+
+function renderDetail(d) {
+  const t = d.threat || {}, dv = d.dv, b = dv && dv.behavior;
+  const out = [];
+  out.push(el("h2", {}, badge(d.risk), t.name || "(이름 없음)"));
+  out.push(el("dl", { class: "kv" },
+    el("dt", {}, "위협 ID"), el("dd", {}, t.id || "-"),
+    el("dt", {}, "엔드포인트"), el("dd", {}, (t.agent_name || "-") + (t.agent_id ? " (" + t.agent_id + ")" : "")),
+    el("dt", {}, "분류"), el("dd", {}, (t.classification || "-") + " / " + (t.confidence_level || "-")),
+    el("dt", {}, "생성 시각"), el("dd", {}, fmtTime(t.created_at)),
+    el("dt", {}, "Storyline"), el("dd", {}, t.storyline_id || "-"),
+    el("dt", {}, "SHA1"), el("dd", {}, t.sha1 || "-"),
+    el("dt", {}, "분석 시각"), el("dd", {}, fmtTime(d.generated_at))));
+  if (d.error) out.push(el("div", { class: "error" }, "오류: " + d.error));
+
+  if (b) {
+    out.push(el("h3", {}, "행위 요약"));
+    out.push(el("ul", { class: "summary" }, (b.summary || []).map(s => el("li", {}, s))));
+    if (b.highlights && b.highlights.length) {
+      out.push(el("h3", {}, "주목할 행위 설명"));
+      for (const h of b.highlights) out.push(el("div", { class: "hl" },
+        el("div", { class: "t" }, h.name, el("span", { class: "tech" }, h.technique)),
+        el("div", { class: "m" }, h.meaning),
+        (h.examples || []).map(x => el("div", { class: "ev" }, x))));
+    }
+    if (b.timeline && b.timeline.length) {
+      out.push(el("h3", {}, "행위 타임라인 (" + b.timeline.length + ")"));
+      out.push(el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "시각"), el("th", {}, "행위"))),
+        el("tbody", {}, b.timeline.map(i => el("tr", { class: i.tags && i.tags.length ? "risky" : "" },
+          el("td", { class: "time" }, i.time ? fmtTime(i.time) : "-"),
+          el("td", { class: "desc" }, (i.tags && i.tags.length ? "⚠ " : "") + i.description,
+            i.count > 1 ? el("span", { class: "cnt" }, "×" + i.count) : null))))));
+    }
+  } else if (dv) {
+    out.push(el("p", { class: "muted" }, "이 리포트에는 행위 분석 정보가 없습니다 (이전 버전에서 생성)."));
+  }
+
+  if (dv && dv.findings && dv.findings.length) {
+    out.push(el("h3", {}, "의심 프로세스/명령줄 (" + dv.findings.length + ")"));
+    out.push(el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "탐지"), el("th", {}, "프로세스"), el("th", {}, "명령어"))),
+      el("tbody", {}, dv.findings.map(f => el("tr", {},
+        el("td", {}, f.category, el("div", { class: "muted" }, f.technique)),
+        el("td", {}, f.process || "-", f.parent ? el("div", { class: "muted" }, "부모: " + f.parent) : null),
+        el("td", { class: "desc" }, f.cmdline || "-"))))));
+  }
+
+  if (dv && dv.iocs) {
+    const groups = [["외부 IP", dv.iocs.ips], ["도메인", dv.iocs.domains], ["SHA256", dv.iocs.sha256], ["SHA1", dv.iocs.sha1], ["MD5", dv.iocs.md5]]
+      .filter(([, v]) => v && v.length);
+    out.push(el("h3", {}, "IOC"));
+    if (!groups.length) out.push(el("p", { class: "muted" }, "추출된 IOC 가 없습니다."));
+    for (const [label, vals] of groups) out.push(el("p", {}, el("div", { class: "muted" }, label), el("div", { class: "ioc" }, vals.map(v => el("span", {}, v)))));
+  }
+
+  if (d.threat_intel && d.threat_intel.length) {
+    out.push(el("h3", {}, "위협 인텔리전스"));
+    out.push(el("table", {}, el("tbody", {}, d.threat_intel.map(v => el("tr", {},
+      el("td", {}, v.malicious ? el("span", { class: "badge HIGH" }, "악성") : el("span", { class: "badge LOW" }, "정상")),
+      el("td", {}, v.source + " · " + v.ioc_type), el("td", { class: "desc" }, v.value),
+      el("td", {}, v.summary, v.link && /^https:\/\//.test(v.link) ? [" ", el("a", { href: v.link, target: "_blank", rel: "noopener" }, "열기")] : null))))));
+  }
+  if (dv) out.push(el("p", { class: "muted" }, "DV 이벤트 " + dv.event_count + "개 · " +
+    Object.entries(dv.event_types || {}).map(([k, v]) => k + " " + v).join(", ")));
+  $("#detail").replaceChildren(...out);
+  $("#detail").scrollTop = 0;
+}
+
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+  level = c.dataset.level;
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c));
+  renderList();
+});
+$("#q").oninput = renderList;
+loadStatus(); loadList();
+setInterval(() => { loadStatus(); loadList(); }, 15000);
+</script>
+</body>
+</html>

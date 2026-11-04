@@ -31,7 +31,20 @@ python -m s1triage                 # 데몬 모드 (기본 30초 주기)
 python -m s1triage --once          # 한 번만 폴링
 python -m s1triage --skip-backlog  # 기존 미해결 위협은 건너뛰고 이후 신규만 분석
 python -m s1triage --threat-id 1234567890   # 특정 위협 1건만 분석
+python -m s1triage --web           # 모니터링 + 웹 화면 (브라우저가 자동으로 열림)
+python -m s1triage --web-only      # 모니터링 없이 저장된 리포트만 웹으로 보기
 ```
+
+## 웹 화면
+
+`python -m s1triage --web` 을 실행하면 모니터링을 하면서 http://127.0.0.1:8080/ 에 웹 화면이 열립니다.
+
+- 왼쪽: 분석된 위협 목록 (최신순, 위험도 배지, 호스트, 주목할 행위). 위험도 필터와 검색 지원.
+- 오른쪽: 선택한 위협의 상세. 위협 정보, 행위 요약, 주목할 행위 설명(의미 + 근거 이벤트), 행위 타임라인, 의심 프로세스, IOC, 위협 인텔리전스.
+- 15초마다 자동 새로고침되고, 상단에 마지막 조회 시각과 오류 여부가 표시됩니다.
+- 화면은 `reports/` 폴더의 JSON 리포트를 읽어서 보여줍니다. `--web` 이면 `REPORT_DIR` 이 비어 있어도 `reports` 에 저장합니다.
+- 외부 라이브러리나 인터넷 연결 없이 동작하고, 기본으로 `127.0.0.1` 에만 열려 **이 PC 에서만** 접속할 수 있습니다. 인증 기능이 없으므로 `WEB_HOST=0.0.0.0` 으로 바꿔 다른 PC 에 공개하지 마세요.
+- 포트가 이미 쓰이고 있으면 `--port 8081` 처럼 바꿔서 실행하세요.
 
 > ⚠️ API 토큰은 절대 코드나 Git 에 넣지 마세요. `.env` 는 `.gitignore` 에 포함되어 있습니다. 토큰이 채팅·코드 등에 노출된 적이 있다면 콘솔에서 재발급(rotate)하는 것을 권장합니다.
 
@@ -58,6 +71,7 @@ python -m s1triage --threat-id 1234567890   # 특정 위협 1건만 분석
 | `ABUSEIPDB_API_KEY` | (선택) | AbuseIPDB 키: IP 평판 조회 |
 | `ENRICH_MAX_LOOKUPS` | 10 | 위협 1건당 TI 조회 상한 (무료 쿼터 보호) |
 | `REPORT_DIR` | (비움) | JSON 리포트 저장 디렉터리 |
+| `WEB_HOST` / `WEB_PORT` | 127.0.0.1 / 8080 | 웹 화면 주소 |
 | `REPORT_RAW_EVENTS` | false | true 면 JSON 리포트에 DV 원본 이벤트 포함 (필드명 확인·룰 튜닝용) |
 
 ## 행위 분석 (무엇을 했는지 설명)
@@ -109,6 +123,7 @@ s1triage/
   state.py       처리한 위협 ID 저장
   report.py      위험도 산정, 콘솔/JSON 리포트
   monitor.py     파이프라인 + CLI
+  web.py         로컬 웹 화면 서버 (static/index.html)
 tests/           가짜 HTTP 응답 기반 단위 테스트
 ```
 
