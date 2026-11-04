@@ -60,3 +60,42 @@ def test_unknown_or_traversal_ids_404(server, bad):
     with pytest.raises(urllib.error.HTTPError) as exc:
         get(server + "/api/reports/" + bad)
     assert exc.value.code == 404
+
+
+def post(url, body, headers=None):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **(headers or {})})
+    with urllib.request.urlopen(req) as r:
+        return r.status, json.loads(r.read())
+
+
+def test_analyze_requires_csrf_header_and_same_origin(server):
+    for headers in ({}, {"X-S1Triage": "1", "Origin": "http://evil.example.com"}):
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            post(server + "/api/analyze", {"threat_id": "111", "refresh": False}, headers)
+        assert exc.value.code == 403
+
+
+def test_analyze_saved_report_end_to_end(server):
+    import time
+    code, job = post(server + "/api/analyze", {"threat_id": "111", "refresh": False}, {"X-S1Triage": "1"})
+    assert code == 202
+    for _ in range(100):
+        job = json.loads(get(server + "/api/jobs/" + job["id"])[2])
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert job["status"] == "done", job
+    recent = json.loads(get(server + "/api/analyses")[2])
+    assert recent[0]["id"] == "111" and recent[0]["verdict"]
+    detail = json.loads(get(server + "/api/analyses/111")[2])
+    assert {"conclusion", "main_report", "beginner_guide", "console_note", "report"} <= set(detail)
+
+
+def test_analyze_rejects_bad_input(server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        post(server + "/api/analyze", {"threat_id": "../x"}, {"X-S1Triage": "1"})
+    assert exc.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as exc:  # 보기 전용 서버는 DV 재조회 불가
+        post(server + "/api/analyze", {"threat_id": "111", "refresh": True}, {"X-S1Triage": "1"})
+    assert exc.value.code == 400

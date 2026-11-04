@@ -84,7 +84,7 @@ class BehaviorAnalysis:
         return {
             "summary": self.summary,
             "highlights": [
-                {"name": t.name, "meaning": t.meaning, "technique": t.technique, "examples": ex}
+                {"name": t.name, "meaning": t.meaning, "technique": t.technique, "weight": t.weight, "examples": ex}
                 for t, ex in self.highlights
             ],
             "timeline": [b.to_dict() for b in self.timeline],

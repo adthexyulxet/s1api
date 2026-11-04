@@ -65,6 +65,27 @@ class ReportStore:
             return None
         return self._load(self.dir / f"threat_{threat_id}.json")
 
+    def list_analyses(self, limit: int = 30) -> List[Dict[str, Any]]:
+        if not self.dir.is_dir():
+            return []
+        items = []
+        for path in self.dir.glob("analysis_*.json"):
+            data = self._load(path)
+            if not data:
+                continue
+            t = (data.get("report") or {}).get("threat") or {}
+            c = data.get("conclusion") or {}
+            items.append({"id": t.get("id"), "name": t.get("name"), "agent_name": t.get("agent_name"),
+                          "verdict": c.get("verdict"), "risk": c.get("risk") or {},
+                          "analyzed_at": data.get("analyzed_at")})
+        items.sort(key=lambda r: r.get("analyzed_at") or "", reverse=True)
+        return items[:limit]
+
+    def get_analysis(self, threat_id: str) -> Optional[Dict[str, Any]]:
+        if not SAFE_ID.match(threat_id):
+            return None
+        return self._load(self.dir / f"analysis_{threat_id}.json")
+
 
 def summarize(data: Dict[str, Any]) -> Dict[str, Any]:
     t = data.get("threat") or {}
@@ -86,7 +107,7 @@ def summarize(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def make_handler(store: ReportStore, status: Optional[Dict[str, Any]]):
+def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None):
     index_html = (STATIC_DIR / "index.html").read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
@@ -121,22 +142,64 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]]):
                 return self._json(report)
             if path == "/api/status":
                 return self._json({"monitoring": status is not None, **(status or {}),
+                                   "can_query": bool(jobs and jobs.can_query),
                                    "report_dir": str(store.dir.resolve())})
+            if path == "/api/analyses":
+                return self._json(store.list_analyses())
+            if path.startswith("/api/analyses/"):
+                data = store.get_analysis(path[len("/api/analyses/"):])
+                if data is None:
+                    return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return self._json(data)
+            if path.startswith("/api/jobs/") and jobs:
+                job = jobs.get(path[len("/api/jobs/"):])
+                if job is None:
+                    return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return self._json(job.to_dict())
             return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+        def _same_origin(self) -> bool:
+            # 다른 웹사이트가 브라우저를 통해 로컬 서버에 분석을 요청하는 것(CSRF)을 막습니다.
+            if self.headers.get("X-S1Triage") != "1":
+                return False
+            origin = self.headers.get("Origin")
+            host = self.headers.get("Host", "")
+            return origin is None or origin in (f"http://{host}", f"https://{host}")
+
+        def do_POST(self):
+            path = urlparse(self.path).path
+            if path != "/api/analyze" or not jobs:
+                return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            if not self._same_origin():
+                return self._json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), 10_000)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                threat_id = str(body.get("threat_id") or "").strip()
+                if not SAFE_ID.match(threat_id):
+                    raise ValueError("Threat ID 를 확인하세요 (숫자/영문만 가능).")
+                job = jobs.submit(threat_id, refresh=bool(body.get("refresh", True)),
+                                  use_ti=bool(body.get("use_ti", True)), timeout=int(body.get("timeout") or 300))
+            except (ValueError, TypeError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return self._json(job.to_dict(), HTTPStatus.ACCEPTED)
 
     return Handler
 
 
 def build_server(report_dir: str, host: str = "127.0.0.1", port: int = 8080,
-                 status: Optional[Dict[str, Any]] = None) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, port), make_handler(ReportStore(report_dir), status))
+                 status: Optional[Dict[str, Any]] = None, settings=None) -> ThreadingHTTPServer:
+    from .jobs import JobManager
+
+    jobs = JobManager(report_dir, settings)
+    return ThreadingHTTPServer((host, port), make_handler(ReportStore(report_dir), status, jobs))
 
 
 def serve(report_dir: str, host: Optional[str] = None, port: Optional[int] = None,
-          status: Optional[Dict[str, Any]] = None, open_browser: bool = True) -> None:
+          status: Optional[Dict[str, Any]] = None, open_browser: bool = True, settings=None) -> None:
     host = host or os.environ.get("WEB_HOST") or "127.0.0.1"
     port = port or int(os.environ.get("WEB_PORT") or 8080)
-    server = build_server(report_dir, host, port, status)
+    server = build_server(report_dir, host, port, status, settings)
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/"
     print(f"[*] 웹 화면: {url}  (리포트 폴더: {Path(report_dir).resolve()}, 종료: Ctrl + C)")
     if host not in ("127.0.0.1", "localhost"):

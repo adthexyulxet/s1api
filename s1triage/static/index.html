@@ -72,7 +72,50 @@
   .error { color: var(--err); background: var(--med-bg); padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
   .muted { color: var(--muted); }
   a { color: var(--accent); }
+  nav { display: flex; gap: 4px; }
+  nav button { border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+               padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  nav button.on { color: var(--accent); background: var(--sel); }
+  .hidden { display: none !important; }
+  #viewAnalyze { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 17px; }
+  .form { display: grid; grid-template-columns: max-content 1fr; gap: 12px 16px; align-items: center; margin-top: 14px; }
+  .form label.l { color: var(--muted); font-size: 13px; }
+  .form input[type=text], .form input[type=number] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+               background: var(--bg); color: var(--text); font: inherit; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 6px;
+         padding: 7px 14px; font: inherit; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .opt { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  .opt .muted { font-size: 12px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  #jobLog { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+            border-radius: 6px; padding: 10px 12px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 6px 0 14px; }
+  .tabs button { border: 0; background: none; color: var(--muted); font: inherit; padding: 8px 12px; cursor: pointer;
+                 border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button.on { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
+  .doc { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.7; }
+  .doc .h1 { font-size: 18px; font-weight: 700; margin: 4px 0 8px; }
+  .doc .h2 { font-size: 15px; font-weight: 700; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .note { font-family: Consolas, ui-monospace, monospace; font-size: 12.5px; background: var(--code); border-radius: 6px;
+          padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+  .verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 18px; font-weight: 800; }
+  .verdict .v { padding: 4px 12px; border-radius: 6px; }
+  .v.tp { color: var(--high); background: var(--high-bg); } .v.chk { color: var(--med); background: var(--med-bg); }
+  .v.fp { color: var(--low); background: var(--low-bg); } .v.hold { color: var(--muted); background: var(--code); }
+  .chain { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+  .chain div { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+  .chain div.hit { border-color: var(--high); color: var(--text); background: var(--high-bg); }
+  .chain div b { display: block; font-size: 12.5px; }
+  .recent .r { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+  .recent .r:hover { color: var(--accent); }
   @media (max-width: 760px) {
+    .form { grid-template-columns: 1fr; }
+    #viewAnalyze { padding: 12px; }
     main { grid-template-columns: 1fr; height: auto; }
     #listPane { border-right: 0; max-height: 45vh; border-bottom: 1px solid var(--line); }
     #detail { padding: 16px; }
@@ -83,9 +126,10 @@
 <body>
 <header>
   <h1>SentinelOne DV 트리아지</h1>
+  <nav><button id="navMonitor" class="on">모니터링</button><button id="navAnalyze">🛡️ 정밀 분석</button></nav>
   <div id="status"><span class="dot"></span><span id="statusText">불러오는 중…</span></div>
 </header>
-<main>
+<main id="viewMonitor">
   <section id="listPane">
     <div class="filters">
       <input id="q" type="search" placeholder="위협 이름, 호스트, ID 검색">
@@ -98,6 +142,31 @@
   </section>
   <section id="detail"><div class="empty">왼쪽에서 위협을 선택하세요.</div></section>
 </main>
+<div id="viewAnalyze" class="hidden">
+  <div class="card">
+    <h2>🛡️ 정밀 분석 <span class="muted" style="font-size:13px;font-weight:400">해설서 · 콘솔 Notes 초안 · 근본원인/킬체인 요약 포함</span></h2>
+    <div class="form">
+      <label class="l" for="aId">Threat ID</label>
+      <div class="row">
+        <input id="aId" type="text" placeholder="예: 2604266661056814661" style="flex:1;min-width:220px">
+        <button class="btn" id="aUseSel">선택된 위협 사용</button>
+      </div>
+      <label class="l">옵션</label>
+      <div>
+        <label class="opt"><input type="checkbox" id="aRefresh" checked><span>DV 새로 조회<br><span class="muted">끄면 저장된 리포트로만 분석합니다 (토큰 불필요).</span></span></label>
+        <label class="opt" style="margin-top:8px"><input type="checkbox" id="aTi" checked><span>🌐 온라인 위협인텔 조회 (VirusTotal · AbuseIPDB)<br><span class="muted">.env 에 API 키가 있을 때만 동작합니다. 해시·IP·도메인이 외부 서비스로 전송됩니다.</span></span></label>
+      </div>
+      <label class="l" for="aTimeout">시간 한도</label>
+      <div class="row"><input id="aTimeout" type="number" min="30" max="1800" value="300" style="width:100px"> <span class="muted">초 (DV 쿼리 대기 한도)</span></div>
+      <span></span>
+      <div class="row"><button class="btn primary" id="aRun">분석 실행</button><span id="aMsg" class="muted"></span></div>
+    </div>
+    <div class="hint">메인 보고서 외에 초보자용 해설서 · 콘솔 Notes 붙여넣기 초안 · 구조화된 결론 요약(킬체인 포함) · 기계판독용 analysis_*.json 을 함께 만들어 탭으로 보여줍니다. 판정은 규칙 기반 추정이며 최종 판단은 분석가가 합니다.</div>
+    <div id="jobLog" class="hidden"></div>
+  </div>
+  <div class="card" id="aResult"><div class="empty">Threat ID 를 넣고 정밀 분석을 실행하세요.</div></div>
+  <div class="card recent"><h3 style="margin-top:0">🕐 최근 결과</h3><div id="aRecent" class="muted">없음</div></div>
+</div>
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
@@ -126,6 +195,9 @@ async function loadStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
     const box = $("#status");
+    canQuery = !!s.can_query;
+    $("#aRefresh").disabled = !canQuery;
+    if (!canQuery) $("#aRefresh").checked = false;
     if (!s.monitoring) {
       box.className = ""; $("#statusText").textContent = "보기 전용 (모니터링 꺼짐) · " + s.report_dir;
     } else if (s.last_error) {
@@ -176,7 +248,8 @@ async function select(id) {
 function renderDetail(d) {
   const t = d.threat || {}, dv = d.dv, b = dv && dv.behavior;
   const out = [];
-  out.push(el("h2", {}, badge(d.risk), t.name || "(이름 없음)"));
+  out.push(el("h2", {}, badge(d.risk), t.name || "(이름 없음)",
+    el("button", { class: "btn", style: "font-size:12px;padding:3px 10px", onclick: () => { $("#aId").value = t.id; showView("analyze"); } }, "🛡️ 정밀 분석")));
   out.push(el("dl", { class: "kv" },
     el("dt", {}, "위협 ID"), el("dd", {}, t.id || "-"),
     el("dt", {}, "엔드포인트"), el("dd", {}, (t.agent_name || "-") + (t.agent_id ? " (" + t.agent_id + ")" : "")),
@@ -239,6 +312,122 @@ function renderDetail(d) {
     Object.entries(dv.event_types || {}).map(([k, v]) => k + " " + v).join(", ")));
   $("#detail").replaceChildren(...out);
   $("#detail").scrollTop = 0;
+}
+
+// ------------------------------------------------------------ 정밀 분석
+let canQuery = false, currentAnalysis = null, currentTab = "conclusion";
+function showView(name) {
+  $("#viewMonitor").classList.toggle("hidden", name !== "monitor");
+  $("#viewAnalyze").classList.toggle("hidden", name !== "analyze");
+  $("#navMonitor").classList.toggle("on", name === "monitor");
+  $("#navAnalyze").classList.toggle("on", name === "analyze");
+  if (name === "analyze") loadRecent();
+}
+$("#navMonitor").onclick = () => showView("monitor");
+$("#navAnalyze").onclick = () => showView("analyze");
+$("#aUseSel").onclick = () => { if (selected) $("#aId").value = selected; else $("#aMsg").textContent = "모니터링 탭에서 위협을 먼저 선택하세요."; };
+
+function verdictClass(v) {
+  return v === "정탐 가능성 높음" ? "tp" : v === "오탐 가능성 높음" ? "fp" : v === "추가 확인 필요" ? "chk" : "hold";
+}
+async function loadRecent() {
+  let rows = [];
+  try { rows = await (await fetch("/api/analyses")).json(); } catch (e) { return; }
+  const box = $("#aRecent");
+  if (!rows.length) { box.textContent = "아직 정밀 분석 결과가 없습니다."; return; }
+  box.replaceChildren(...rows.map(r => el("div", { class: "r", onclick: () => openAnalysis(r.id) },
+    el("span", { class: "badge v " + verdictClass(r.verdict) }, r.verdict || "-"),
+    el("b", {}, r.name || "-"), el("span", { class: "muted" }, (r.agent_name || "-") + " · " + fmtTime(r.analyzed_at) + " · " + r.id))));
+}
+async function openAnalysis(id) {
+  const res = await fetch("/api/analyses/" + encodeURIComponent(id));
+  if (!res.ok) return;
+  currentAnalysis = await res.json(); currentTab = "conclusion";
+  $("#aId").value = id;
+  renderAnalysis();
+}
+async function runAnalysis() {
+  const id = $("#aId").value.trim();
+  if (!id) { $("#aMsg").textContent = "Threat ID 를 입력하세요."; return; }
+  $("#aRun").disabled = true; $("#aMsg").textContent = "분석 요청 중…";
+  const log = $("#jobLog"); log.classList.remove("hidden"); log.textContent = "";
+  let job;
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-S1Triage": "1" },
+      body: JSON.stringify({ threat_id: id, refresh: $("#aRefresh").checked, use_ti: $("#aTi").checked, timeout: Number($("#aTimeout").value) || 300 }) });
+    job = await res.json();
+    if (!res.ok) throw new Error(job.error || "요청 실패");
+  } catch (e) { $("#aMsg").textContent = "오류: " + e.message; $("#aRun").disabled = false; return; }
+  $("#aMsg").textContent = "분석 중… (DV 쿼리는 수십 초 걸릴 수 있습니다)";
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    try { job = await (await fetch("/api/jobs/" + job.id)).json(); } catch (e) { continue; }
+    log.textContent = (job.logs || []).join("\n"); log.scrollTop = log.scrollHeight;
+    if (job.status === "done" || job.status === "error") break;
+  }
+  $("#aRun").disabled = false;
+  if (job.status === "error") { $("#aMsg").textContent = "실패: " + job.error; return; }
+  $("#aMsg").textContent = "완료";
+  await openAnalysis(id); loadRecent(); loadList();
+}
+$("#aRun").onclick = runAnalysis;
+$("#aId").onkeydown = (e) => { if (e.key === "Enter") runAnalysis(); };
+
+function renderDoc(text) {
+  const box = el("div", { class: "doc" });
+  for (const line of (text || "").split("\n")) {
+    if (line.startsWith("# ")) box.append(el("div", { class: "h1" }, line.slice(2)));
+    else if (line.startsWith("## ")) box.append(el("div", { class: "h2" }, line.slice(3)));
+    else box.append(line + "\n");
+  }
+  return box;
+}
+const IOC_LABELS = { ips: "외부 IP", domains: "도메인", sha256: "SHA256", sha1: "SHA1", md5: "MD5" };
+const KILLCHAIN = ["초기 침투", "실행", "지속성", "권한 상승", "방어 회피", "인증정보 접근", "탐색", "측면 이동", "수집", "명령제어(C2)", "유출", "영향"];
+function renderConclusion(a) {
+  const c = a.conclusion || {}, t = (a.report || {}).threat || {};
+  const hit = Object.fromEntries((c.kill_chain || []).map(k => [k.tactic, k.items]));
+  const iocs = Object.entries(c.key_iocs || {});
+  return el("div", {},
+    el("div", { class: "verdict" }, el("span", { class: "v " + verdictClass(c.verdict) }, c.verdict || "-"),
+      el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "신뢰도 " + (c.confidence || "-") + " · 위험도 " + ((c.risk || {}).level || "-") + " " + ((c.risk || {}).score ?? ""))),
+    el("p", { class: "muted" }, (t.name || "-") + " · " + (t.agent_name || "-") + " · 분석 " + fmtTime(a.analyzed_at)),
+    el("h3", {}, "판정 근거"), el("ul", { class: "summary" }, (c.reasons || []).map(x => el("li", {}, x))),
+    el("h3", {}, "근본원인 요약"), el("ul", { class: "summary" }, (c.root_cause || []).map(x => el("li", {}, x))),
+    el("h3", {}, "킬체인 (MITRE ATT&CK 전술)"),
+    el("div", { class: "chain" }, KILLCHAIN.map(k => el("div", { class: hit[k] ? "hit" : "" }, el("b", {}, k), hit[k] ? hit[k].join(", ") : "-"))),
+    el("h3", {}, "핵심 IOC"),
+    iocs.length ? iocs.map(([k, v]) => el("p", {}, el("div", { class: "muted" }, IOC_LABELS[k] || k), el("div", { class: "ioc" }, v.map(x => el("span", {}, x)))))
+                : el("p", { class: "muted" }, "추출된 IOC 가 없습니다."),
+    el("h3", {}, "후속 조치 가이드"), el("ol", { class: "summary" }, (c.actions || []).map(x => el("li", {}, x))),
+    el("p", { class: "muted" }, "※ " + (c.disclaimer || "")));
+}
+function renderAnalysis() {
+  const a = currentAnalysis; if (!a) return;
+  const tabs = [["conclusion", "결론 요약"], ["main", "메인 보고서"], ["guide", "초보자용 해설서"], ["note", "콘솔 Notes 초안"], ["json", "analysis.json"]];
+  let body;
+  if (currentTab === "conclusion") body = renderConclusion(a);
+  else if (currentTab === "main") body = renderDoc(a.main_report);
+  else if (currentTab === "guide") body = renderDoc(a.beginner_guide);
+  else if (currentTab === "note") {
+    const msg = el("span", { class: "muted" });
+    body = el("div", {}, el("div", { class: "row", style: "margin-bottom:10px" },
+      el("button", { class: "btn primary", onclick: async () => {
+        try { await navigator.clipboard.writeText(a.console_note); msg.textContent = "복사했습니다. 콘솔의 Threat > Notes 에 붙여넣으세요."; }
+        catch (e) { msg.textContent = "복사 실패: 아래 내용을 직접 선택해 복사하세요."; } } }, "복사"), msg),
+      el("div", { class: "note" }, a.console_note || ""));
+  } else {
+    const text = JSON.stringify(a, null, 2);
+    body = el("div", {}, el("div", { class: "row", style: "margin-bottom:10px" },
+      el("button", { class: "btn", onclick: () => {
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        const link = el("a", { href: url, download: "analysis_" + (((a.report || {}).threat || {}).id || "result") + ".json" });
+        document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, "JSON 다운로드")), el("div", { class: "note", style: "max-height:520px;overflow:auto" }, text));
+  }
+  $("#aResult").replaceChildren(
+    el("div", { class: "tabs" }, tabs.map(([k, label]) => el("button", { class: k === currentTab ? "on" : "", onclick: () => { currentTab = k; renderAnalysis(); } }, label))),
+    body);
 }
 
 document.querySelectorAll(".chip").forEach(c => c.onclick = () => {

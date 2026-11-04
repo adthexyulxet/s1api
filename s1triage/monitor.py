@@ -133,7 +133,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .web import serve
 
         try:
-            serve(os.environ.get("REPORT_DIR") or "reports", port=args.port)
+            try:  # 토큰이 있으면 정밀 분석에서 DV 재조회도 가능
+                web_settings: Optional[Settings] = Settings.from_env()
+            except ConfigError:
+                web_settings = None
+            serve(os.environ.get("REPORT_DIR") or "reports", port=args.port, settings=web_settings)
         except KeyboardInterrupt:
             print("\n[*] 웹 화면을 종료했습니다.")
         except OSError as exc:
@@ -169,7 +173,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if not settings.report_dir:  # 웹 화면은 저장된 JSON 리포트를 읽으므로 저장을 켬
                 pipeline.settings = settings = dataclasses.replace(settings, report_dir="reports")
             threading.Thread(target=pipeline.run_forever, name="monitor", daemon=True).start()
-            serve(settings.report_dir, port=args.port, status=pipeline.status)
+            serve(settings.report_dir, port=args.port, status=pipeline.status, settings=settings)
             return 0
         pipeline.run_forever()
     except KeyboardInterrupt:
