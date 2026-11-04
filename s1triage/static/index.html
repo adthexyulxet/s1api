@@ -28,25 +28,27 @@
   #status { color: var(--muted); font-size: 12px; }
   #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
   #status.ok .dot { background: var(--low); } #status.bad .dot { background: var(--high); }
-  main { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; height: calc(100vh - 53px); }
-  #listPane { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-  .filters { padding: 12px; display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); }
-  .filters input { flex: 1 1 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
-                   background: var(--panel); color: var(--text); font: inherit; }
+  #viewMonitor { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .n { font-size: 22px; font-weight: 800; } .stat .k { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .toolbar input[type=search] { flex: 1 1 260px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+                                background: var(--panel); color: var(--text); font: inherit; }
+  .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  #threatTable th { position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+  #threatTable td { vertical-align: middle; }
+  #threatTable tr:hover td { background: var(--sel); }
+  .tid { font-family: Consolas, ui-monospace, monospace; font-size: 12px; white-space: nowrap; }
+  .runbtn { font-size: 12px; padding: 3px 10px; margin-left: 6px; white-space: nowrap; }
+  .tname { font-weight: 600; } .sub { color: var(--muted); font-size: 12px; word-break: break-all; }
+  .pill { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--code); color: var(--muted); white-space: nowrap; }
   .chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px;
           padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
   .chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  #list { overflow-y: auto; flex: 1; }
-  .item { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
-  .item:hover { background: var(--sel); } .item.sel { background: var(--sel); box-shadow: inset 3px 0 var(--accent); }
-  .item .top { display: flex; gap: 8px; align-items: center; }
-  .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .item .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .item .tags { margin-top: 4px; font-size: 12px; color: var(--high); }
   .badge { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; white-space: nowrap; }
   .HIGH { color: var(--high); background: var(--high-bg); } .MEDIUM { color: var(--med); background: var(--med-bg); }
   .LOW { color: var(--low); background: var(--low-bg); }
-  #detail { overflow-y: auto; padding: 20px 28px 48px; min-width: 0; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
   h2 { font-size: 20px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   h3 { font-size: 14px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
@@ -116,9 +118,7 @@
   @media (max-width: 760px) {
     .form { grid-template-columns: 1fr; }
     #viewAnalyze { padding: 12px; }
-    main { grid-template-columns: 1fr; height: auto; }
-    #listPane { border-right: 0; max-height: 45vh; border-bottom: 1px solid var(--line); }
-    #detail { padding: 16px; }
+    #viewMonitor { padding: 12px; }
     header { padding: 10px 16px; }
   }
 </style>
@@ -126,22 +126,26 @@
 <body>
 <header>
   <h1>SentinelOne DV 트리아지</h1>
-  <nav><button id="navMonitor" class="on">모니터링</button><button id="navAnalyze">🛡️ 정밀 분석</button></nav>
+  <nav><button id="navMonitor" class="on">📋 이벤트 대시보드</button><button id="navAnalyze">🛡️ 정밀 분석</button></nav>
   <div id="status"><span class="dot"></span><span id="statusText">불러오는 중…</span></div>
 </header>
-<main id="viewMonitor">
-  <section id="listPane">
-    <div class="filters">
-      <input id="q" type="search" placeholder="위협 이름, 호스트, ID 검색">
-      <button class="chip on" data-level="ALL">전체</button>
-      <button class="chip" data-level="HIGH">HIGH</button>
-      <button class="chip" data-level="MEDIUM">MEDIUM</button>
-      <button class="chip" data-level="LOW">LOW</button>
-    </div>
-    <div id="list"></div>
-  </section>
-  <section id="detail"><div class="empty">왼쪽에서 위협을 선택하세요.</div></section>
-</main>
+<div id="viewMonitor">
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="위협 이름, 호스트, Threat ID, 파일 경로 검색 (불러온 목록 안에서)">
+    <button class="chip on" data-status="all">전체</button>
+    <button class="chip" data-status="unresolved">미해결만</button>
+    <button class="btn" id="reload">새로고침</button>
+    <span class="muted" id="listInfo"></span>
+  </div>
+  <div class="tablewrap">
+    <table id="threatTable">
+      <thead><tr><th>탐지 시각</th><th>위협</th><th>엔드포인트</th><th>분류 / 신뢰도</th><th>상태</th><th>분석 결과</th><th>Threat ID</th></tr></thead>
+      <tbody id="threatRows"><tr><td colspan="7" class="empty">불러오는 중…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="row" style="justify-content:center;margin-top:12px"><button class="btn hidden" id="more">더 보기</button></div>
+</div>
 <div id="viewAnalyze" class="hidden">
   <div class="card">
     <h2>🛡️ 정밀 분석 <span class="muted" style="font-size:13px;font-weight:400">해설서 · 콘솔 Notes 초안 · 근본원인/킬체인 요약 포함</span></h2>
@@ -149,7 +153,6 @@
       <label class="l" for="aId">Threat ID</label>
       <div class="row">
         <input id="aId" type="text" placeholder="예: 2604266661056814661" style="flex:1;min-width:220px">
-        <button class="btn" id="aUseSel">선택된 위협 사용</button>
       </div>
       <label class="l">옵션</label>
       <div>
@@ -174,7 +177,7 @@
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
-let reports = [], selected = null, level = "ALL";
+let threats = [], nextCursor = null, statusFilter = "all", source = "console";
 
 function el(tag, attrs, ...children) {
   const n = document.createElement(tag);
@@ -205,119 +208,95 @@ async function loadStatus() {
     $("#aRefresh").disabled = !canQuery;
     if (!canQuery) $("#aRefresh").checked = false;
     if (!s.monitoring) {
-      box.className = ""; $("#statusText").textContent = "보기 전용 (모니터링 꺼짐) · " + s.report_dir;
+      box.className = canQuery ? "ok" : "";
+      $("#statusText").textContent = canQuery ? "콘솔 연결됨 · 버튼을 눌러 심층 분석" : "보기 전용 (토큰 없음) · 저장된 리포트만 표시";
     } else if (s.last_error) {
       box.className = "bad"; $("#statusText").textContent = "조회 오류: " + s.last_error.slice(0, 80);
     } else {
       box.className = "ok";
-      $("#statusText").textContent = "모니터링 중 · 마지막 조회 " + fmtTime(s.last_poll_at) + " · 분석 " + s.analyzed + "건";
+      $("#statusText").textContent = "자동 분석 중 · 마지막 조회 " + fmtTime(s.last_poll_at) + " · 분석 " + s.analyzed + "건";
     }
   } catch (e) { $("#status").className = "bad"; $("#statusText").textContent = "서버에 연결할 수 없습니다"; }
 }
 
-async function loadList() {
-  try { reports = await (await fetch("/api/reports")).json(); } catch (e) { return; }
-  renderList();
-  if (!selected && reports.length && window.innerWidth > 760) select(reports[0].id);
+// ------------------------------------------------------------ 이벤트 대시보드
+const VERDICT_KO = { true_positive: "정탐", false_positive: "오탐", suspicious: "의심", undefined: "미지정" };
+const INCIDENT_KO = { unresolved: "미해결", in_progress: "진행 중", resolved: "해결됨" };
+const MITIGATION_KO = { not_mitigated: "미조치", mitigated: "조치됨", marked_as_benign: "정상 처리", active: "활성", blocked: "차단됨" };
+const ko = (map, v) => v ? (map[v] || v) : "-";
+
+async function loadThreats(append) {
+  const btn = $("#more");
+  if (!append) { nextCursor = null; $("#listInfo").textContent = "불러오는 중…"; }
+  const qs = new URLSearchParams({ limit: "100", status: statusFilter });
+  if (append && nextCursor) qs.set("cursor", nextCursor);
+  let data;
+  try {
+    const res = await fetch("/api/threats?" + qs);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "조회 실패");
+  } catch (e) { $("#listInfo").textContent = "오류: " + e.message; return; }
+  source = data.source;
+  threats = append ? threats.concat(data.items) : data.items;
+  nextCursor = data.next_cursor;
+  btn.classList.toggle("hidden", !nextCursor);
+  $("#listInfo").textContent = (source === "saved" ? "저장된 리포트 " : "콘솔 ") + threats.length + "건" +
+    (data.total ? " / 전체 " + data.total + "건" : "") + " · " + new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  renderThreats();
 }
 
-function renderList() {
+function renderStats() {
+  const n = (f) => threats.filter(f).length;
+  const items = [
+    ["불러온 위협", threats.length],
+    ["미해결", n(t => t.incident_status === "unresolved")],
+    ["malicious", n(t => (t.confidence_level || "") === "malicious")],
+    ["심층 분석 완료", n(t => t.analysis)],
+    ["정탐 추정", n(t => t.analysis && (t.analysis.verdict === "정탐 가능성 높음" || t.analysis.ai_verdict === "정탐"))],
+  ];
+  $("#stats").replaceChildren(...items.map(([k, v]) => el("div", { class: "stat" }, el("div", { class: "n" }, v), el("div", { class: "k" }, k))));
+}
+
+function analysisCell(t) {
+  if (!t.analysis) return el("span", { class: "muted" }, "-");
+  const a = t.analysis;
+  return el("div", {},
+    el("span", { class: "badge v " + verdictClass(a.verdict) }, a.verdict || "-"),
+    a.ai_verdict ? [" ", el("span", { class: "badge v " + aiClass(a.ai_verdict) }, "AI " + a.ai_verdict)] : null,
+    el("div", {}, el("a", { href: "#", onclick: (e) => { e.preventDefault(); showView("analyze"); openAnalysis(t.id); } }, "결과 보기")));
+}
+
+function renderThreats() {
+  renderStats();
   const q = $("#q").value.trim().toLowerCase();
-  const rows = reports.filter(r =>
-    (level === "ALL" || (r.risk && r.risk.level) === level) &&
-    (!q || [r.name, r.agent_name, r.id].some(v => (v || "").toLowerCase().includes(q))));
-  const list = $("#list");
-  list.replaceChildren();
+  const rows = threats.filter(t => !q || [t.name, t.agent_name, t.id, t.file_path, t.storyline_id, t.sha1]
+    .some(v => (v || "").toLowerCase().includes(q)));
+  const body = $("#threatRows");
   if (!rows.length) {
-    list.append(el("div", { class: "empty" }, reports.length ? "조건에 맞는 위협이 없습니다." :
-      "아직 저장된 리포트가 없습니다. 모니터링이 위협을 분석하면 여기에 나타납니다."));
+    body.replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty" },
+      threats.length ? "검색 조건에 맞는 위협이 없습니다." : (source === "saved" ? "저장된 리포트가 없습니다." : "콘솔에 위협이 없습니다."))));
     return;
   }
-  for (const r of rows) {
-    list.append(el("div", { class: "item" + (r.id === selected ? " sel" : ""), onclick: () => select(r.id) },
-      el("div", { class: "top" }, badge(r.risk), el("span", { class: "name" }, r.name || "(이름 없음)")),
-      el("div", { class: "meta" }, (r.agent_name || "-") + " · " + fmtTime(r.created_at) +
-        (r.event_count !== null && r.event_count !== undefined ? " · 이벤트 " + r.event_count : "")),
-      r.highlights && r.highlights.length ? el("div", { class: "tags" }, "⚠ " + r.highlights.slice(0, 3).join(", ")) : null,
-      r.error ? el("div", { class: "tags" }, "오류: " + r.error.slice(0, 60)) : null));
-  }
+  body.replaceChildren(...rows.map(t => el("tr", {},
+    el("td", { class: "time" }, fmtTime(t.created_at)),
+    el("td", {}, el("div", { class: "tname" }, t.name || "-"), t.file_path ? el("div", { class: "sub" }, t.file_path) : null),
+    el("td", {}, t.agent_name || "-", t.os ? el("div", { class: "sub" }, t.os) : null),
+    el("td", {}, t.classification || "-", el("div", { class: "sub" }, t.confidence_level || "-")),
+    el("td", {}, el("span", { class: "pill" }, ko(INCIDENT_KO, t.incident_status)), " ",
+      el("span", { class: "pill" }, ko(MITIGATION_KO, t.mitigation_status)),
+      t.analyst_verdict && t.analyst_verdict !== "undefined" ? el("div", { class: "sub" }, "분석가: " + ko(VERDICT_KO, t.analyst_verdict)) : null),
+    el("td", {}, analysisCell(t)),
+    el("td", {}, el("span", { class: "tid" }, t.id),
+      el("button", { class: "btn primary runbtn", title: "이 위협을 바로 심층 분석합니다",
+        onclick: () => startDeepAnalysis(t) }, "🛡️ 심층 분석")))));
 }
 
-async function select(id) {
-  selected = id; renderList();
-  const res = await fetch("/api/reports/" + encodeURIComponent(id));
-  if (!res.ok) { $("#detail").replaceChildren(el("div", { class: "empty" }, "리포트를 불러오지 못했습니다.")); return; }
-  renderDetail(await res.json());
-  if (window.innerWidth <= 760) $("#detail").scrollIntoView({ behavior: "smooth" });
-}
-
-function renderDetail(d) {
-  const t = d.threat || {}, dv = d.dv, b = dv && dv.behavior;
-  const out = [];
-  out.push(el("h2", {}, badge(d.risk), t.name || "(이름 없음)",
-    el("button", { class: "btn", style: "font-size:12px;padding:3px 10px", onclick: () => { $("#aId").value = t.id; showView("analyze"); } }, "🛡️ 정밀 분석")));
-  out.push(el("dl", { class: "kv" },
-    el("dt", {}, "위협 ID"), el("dd", {}, t.id || "-"),
-    el("dt", {}, "엔드포인트"), el("dd", {}, (t.agent_name || "-") + (t.agent_id ? " (" + t.agent_id + ")" : "")),
-    el("dt", {}, "분류"), el("dd", {}, (t.classification || "-") + " / " + (t.confidence_level || "-")),
-    el("dt", {}, "생성 시각"), el("dd", {}, fmtTime(t.created_at)),
-    el("dt", {}, "Storyline"), el("dd", {}, t.storyline_id || "-"),
-    el("dt", {}, "SHA1"), el("dd", {}, t.sha1 || "-"),
-    el("dt", {}, "분석 시각"), el("dd", {}, fmtTime(d.generated_at))));
-  if (d.error) out.push(el("div", { class: "error" }, "오류: " + d.error));
-
-  if (b) {
-    out.push(el("h3", {}, "행위 요약"));
-    out.push(el("ul", { class: "summary" }, (b.summary || []).map(s => el("li", {}, s))));
-    if (b.highlights && b.highlights.length) {
-      out.push(el("h3", {}, "주목할 행위 설명"));
-      for (const h of b.highlights) out.push(el("div", { class: "hl" },
-        el("div", { class: "t" }, h.name, el("span", { class: "tech" }, h.technique)),
-        el("div", { class: "m" }, h.meaning),
-        (h.examples || []).map(x => el("div", { class: "ev" }, x))));
-    }
-    if (b.timeline && b.timeline.length) {
-      out.push(el("h3", {}, "행위 타임라인 (" + b.timeline.length + ")"));
-      out.push(el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "시각"), el("th", {}, "행위"))),
-        el("tbody", {}, b.timeline.map(i => el("tr", { class: i.tags && i.tags.length ? "risky" : "" },
-          el("td", { class: "time" }, i.time ? fmtTime(i.time) : "-"),
-          el("td", { class: "desc" }, (i.tags && i.tags.length ? "⚠ " : "") + i.description,
-            i.count > 1 ? el("span", { class: "cnt" }, "×" + i.count) : null))))));
-    }
-  } else if (dv) {
-    out.push(el("p", { class: "muted" }, "이 리포트에는 행위 분석 정보가 없습니다 (이전 버전에서 생성)."));
-  }
-
-  if (dv && dv.findings && dv.findings.length) {
-    out.push(el("h3", {}, "의심 프로세스/명령줄 (" + dv.findings.length + ")"));
-    out.push(el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "탐지"), el("th", {}, "프로세스"), el("th", {}, "명령어"))),
-      el("tbody", {}, dv.findings.map(f => el("tr", {},
-        el("td", {}, f.category, el("div", { class: "muted" }, f.technique)),
-        el("td", {}, f.process || "-", f.parent ? el("div", { class: "muted" }, "부모: " + f.parent) : null),
-        el("td", { class: "desc" }, f.cmdline || "-"))))));
-  }
-
-  if (dv && dv.iocs) {
-    const groups = [["외부 IP", dv.iocs.ips], ["도메인", dv.iocs.domains], ["SHA256", dv.iocs.sha256], ["SHA1", dv.iocs.sha1], ["MD5", dv.iocs.md5]]
-      .filter(([, v]) => v && v.length);
-    out.push(el("h3", {}, "IOC"));
-    if (!groups.length) out.push(el("p", { class: "muted" }, "추출된 IOC 가 없습니다."));
-    for (const [label, vals] of groups) out.push(el("p", {}, el("div", { class: "muted" }, label), el("div", { class: "ioc" }, vals.map(v => el("span", {}, v)))));
-  }
-
-  if (d.threat_intel && d.threat_intel.length) {
-    out.push(el("h3", {}, "위협 인텔리전스"));
-    out.push(el("table", {}, el("tbody", {}, d.threat_intel.map(v => el("tr", {},
-      el("td", {}, v.malicious ? el("span", { class: "badge HIGH" }, "악성") : el("span", { class: "badge LOW" }, "정상")),
-      el("td", {}, v.source + " · " + v.ioc_type), el("td", { class: "desc" }, v.value),
-      el("td", {}, v.summary, v.link && /^https:\/\//.test(v.link) ? [" ", el("a", { href: v.link, target: "_blank", rel: "noopener" }, "열기")] : null))))));
-  }
-  if (dv) out.push(el("p", { class: "muted" }, "DV 이벤트 " + dv.event_count + "개 · " +
-    Object.entries(dv.event_types || {}).map(([k, v]) => k + " " + v).join(", ")));
-  $("#detail").replaceChildren(...out);
-  $("#detail").scrollTop = 0;
+function startDeepAnalysis(t) {
+  $("#aId").value = t.id;
+  if (!canQuery) $("#aRefresh").checked = false;
+  showView("analyze");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  runAnalysis();
 }
 
 // ------------------------------------------------------------ 정밀 분석
@@ -331,7 +310,6 @@ function showView(name) {
 }
 $("#navMonitor").onclick = () => showView("monitor");
 $("#navAnalyze").onclick = () => showView("analyze");
-$("#aUseSel").onclick = () => { if (selected) $("#aId").value = selected; else $("#aMsg").textContent = "모니터링 탭에서 위협을 먼저 선택하세요."; };
 
 function verdictClass(v) {
   return v === "정탐 가능성 높음" ? "tp" : v === "오탐 가능성 높음" ? "fp" : v === "추가 확인 필요" ? "chk" : "hold";
@@ -356,7 +334,8 @@ async function openAnalysis(id) {
 async function runAnalysis() {
   const id = $("#aId").value.trim();
   if (!id) { $("#aMsg").textContent = "Threat ID 를 입력하세요."; return; }
-  $("#aRun").disabled = true; $("#aMsg").textContent = "분석 요청 중…";
+  if ($("#aRun").disabled) { $("#aMsg").textContent = "이미 분석이 진행 중입니다. 끝난 뒤 다시 눌러 주세요."; return; }
+  $("#aRun").disabled = true; $("#aMsg").textContent = "분석 요청 중… (" + id + ")";
   const log = $("#jobLog"); log.classList.remove("hidden"); log.textContent = "";
   let job;
   try {
@@ -375,7 +354,10 @@ async function runAnalysis() {
   $("#aRun").disabled = false;
   if (job.status === "error") { $("#aMsg").textContent = "실패: " + job.error; return; }
   $("#aMsg").textContent = "완료";
-  await openAnalysis(id); loadRecent(); loadList();
+  await openAnalysis(id); loadRecent();
+  const t = threats.find(x => x.id === id);  // 대시보드의 분석 결과 칸 갱신
+  if (t) { const a = currentAnalysis || {}; t.analysis = { verdict: (a.conclusion || {}).verdict, risk: (a.conclusion || {}).risk,
+    ai_verdict: a.ai_verdict && !a.ai_verdict.error ? a.ai_verdict.verdict : null, analyzed_at: a.analyzed_at }; renderThreats(); }
 }
 $("#aRun").onclick = runAnalysis;
 $("#aId").onkeydown = (e) => { if (e.key === "Enter") runAnalysis(); };
@@ -456,13 +438,15 @@ function renderAnalysis() {
 }
 
 document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
-  level = c.dataset.level;
+  statusFilter = c.dataset.status;
   document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c));
-  renderList();
+  loadThreats(false);
 });
-$("#q").oninput = renderList;
-loadStatus(); loadList();
-setInterval(() => { loadStatus(); loadList(); }, 15000);
+$("#q").oninput = renderThreats;
+$("#reload").onclick = () => loadThreats(false);
+$("#more").onclick = () => loadThreats(true);
+loadStatus(); loadThreats(false);
+setInterval(loadStatus, 30000);
 </script>
 </body>
 </html>

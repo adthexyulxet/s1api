@@ -118,7 +118,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--once", action="store_true", help="한 번만 폴링하고 종료")
     parser.add_argument("--threat-id", help="특정 위협 ID 하나만 분석하고 종료")
     parser.add_argument("--skip-backlog", action="store_true", help="시작 시점의 기존 미해결 위협은 분석하지 않고 건너뜀")
-    parser.add_argument("--web", action="store_true", help="모니터링을 실행하면서 웹 화면도 함께 띄움")
+    parser.add_argument("--web", action="store_true", help="웹 대시보드 실행 (콘솔 위협 목록 + 버튼으로 심층 분석)")
+    parser.add_argument("--auto-triage", action="store_true",
+                        help="--web 과 함께: 새 위협을 백그라운드에서 자동으로 분석 (기본은 버튼으로만 분석)")
     parser.add_argument("--web-only", action="store_true", help="모니터링 없이 저장된 리포트만 웹 화면으로 보기 (토큰 불필요)")
     parser.add_argument("--port", type=int, default=None, help="웹 화면 포트 (기본: WEB_PORT 또는 8080)")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -172,8 +174,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             if not settings.report_dir:  # 웹 화면은 저장된 JSON 리포트를 읽으므로 저장을 켬
                 pipeline.settings = settings = dataclasses.replace(settings, report_dir="reports")
-            threading.Thread(target=pipeline.run_forever, name="monitor", daemon=True).start()
-            serve(settings.report_dir, port=args.port, status=pipeline.status, settings=settings)
+            status = None
+            if args.auto_triage:
+                threading.Thread(target=pipeline.run_forever, name="monitor", daemon=True).start()
+                status = pipeline.status
+            serve(settings.report_dir, port=args.port, status=status, settings=settings)
             return 0
         pipeline.run_forever()
     except KeyboardInterrupt:

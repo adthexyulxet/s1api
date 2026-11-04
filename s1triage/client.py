@@ -44,6 +44,11 @@ class Threat:
     classification: Optional[str] = None
     confidence_level: Optional[str] = None
     sha1: Optional[str] = None
+    incident_status: Optional[str] = None
+    analyst_verdict: Optional[str] = None
+    mitigation_status: Optional[str] = None
+    file_path: Optional[str] = None
+    os_name: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -60,6 +65,11 @@ class Threat:
             classification=info.get("classification"),
             confidence_level=info.get("confidenceLevel"),
             sha1=info.get("sha1"),
+            incident_status=info.get("incidentStatus"),
+            analyst_verdict=info.get("analystVerdict"),
+            mitigation_status=info.get("mitigationStatus"),
+            file_path=info.get("filePath"),
+            os_name=agent.get("agentOsName") or agent.get("agentOsType"),
             raw=t,
         )
 
@@ -162,6 +172,19 @@ class S1Client:
         }
         data = self._request("GET", "/threats", params=params)
         return [Threat.from_api(t) for t in data.get("data") or []]
+
+    def list_threats(self, limit: int = 50, cursor: Optional[str] = None,
+                     unresolved_only: bool = False) -> tuple[List[Threat], Optional[str], Optional[int]]:
+        """대시보드용 위협 목록 (최신순, 커서 페이지네이션). (위협들, 다음 커서, 전체 건수)"""
+        params: Dict[str, Any] = {"limit": max(1, min(limit, 200)), "sortBy": "createdAt", "sortOrder": "desc"}
+        if unresolved_only:
+            params["resolved"] = "false"
+        if cursor:
+            params["cursor"] = cursor
+        data = self._request("GET", "/threats", params=params)
+        pagination = data.get("pagination") or {}
+        return ([Threat.from_api(t) for t in data.get("data") or []],
+                pagination.get("nextCursor"), pagination.get("totalItems"))
 
     def get_threat(self, threat_id: str) -> Optional[Threat]:
         data = self._request("GET", "/threats", params={"ids": threat_id})

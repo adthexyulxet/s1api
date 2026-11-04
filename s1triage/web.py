@@ -15,9 +15,10 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .ai_verdict import ai_available
+from .client import S1ApiError
 
 log = logging.getLogger(__name__)
 
@@ -111,8 +112,54 @@ def summarize(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def threat_row(t, store: "ReportStore") -> Dict[str, Any]:
+    analysis = store.get_analysis(str(t.threat_id)) or {}
+    ai = analysis.get("ai_verdict") or {}
+    return {
+        "id": t.threat_id, "name": t.threat_name, "created_at": t.created_at,
+        "agent_name": t.agent_name, "agent_id": t.agent_id, "os": t.os_name,
+        "classification": t.classification, "confidence_level": t.confidence_level,
+        "incident_status": t.incident_status, "analyst_verdict": t.analyst_verdict,
+        "mitigation_status": t.mitigation_status, "file_path": t.file_path,
+        "storyline_id": t.storyline_id, "sha1": t.sha1,
+        "has_report": (store.dir / f"threat_{t.threat_id}.json").is_file() if SAFE_ID.match(str(t.threat_id)) else False,
+        "analysis": None if not analysis else {
+            "verdict": (analysis.get("conclusion") or {}).get("verdict"),
+            "risk": (analysis.get("conclusion") or {}).get("risk"),
+            "ai_verdict": None if ai.get("error") else ai.get("verdict"),
+            "analyzed_at": analysis.get("analyzed_at"),
+        },
+    }
+
+
+def saved_threat_rows(store: "ReportStore") -> List[Dict[str, Any]]:
+    """콘솔에 연결하지 않을 때: 저장된 리포트로 목록을 만듭니다."""
+    from .client import Threat
+
+    rows = []
+    for path in sorted(store.dir.glob("threat_*.json")) if store.dir.is_dir() else []:
+        data = store._load(path)
+        if not data:
+            continue
+        t = data.get("threat") or {}
+        threat = Threat(threat_id=str(t.get("id")), threat_name=t.get("name") or "-", storyline_id=t.get("storyline_id"),
+                        created_at=t.get("created_at"), agent_id=t.get("agent_id"), agent_name=t.get("agent_name"),
+                        classification=t.get("classification"), confidence_level=t.get("confidence_level"), sha1=t.get("sha1"))
+        rows.append(threat_row(threat, store))
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return rows
+
+
 def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None):
     index_html = (STATIC_DIR / "index.html").read_bytes()
+    client_holder: Dict[str, Any] = {}
+
+    def console_client():
+        if not (jobs and jobs.settings):
+            return None
+        if "client" not in client_holder:
+            client_holder["client"] = jobs.client_factory(jobs.settings)
+        return client_holder["client"]
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "s1triage"
@@ -149,6 +196,24 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
                                    "can_query": bool(jobs and jobs.can_query),
                                    "ai_available": ai_available(),
                                    "report_dir": str(store.dir.resolve())})
+            if path == "/api/threats":
+                q = parse_qs(urlparse(self.path).query)
+                client = console_client()
+                if client is None:
+                    return self._json({"source": "saved", "items": saved_threat_rows(store),
+                                       "next_cursor": None, "total": None})
+                try:
+                    limit = int((q.get("limit") or ["50"])[0])
+                except ValueError:
+                    limit = 50
+                try:
+                    threats, cursor, total = client.list_threats(
+                        limit=limit, cursor=(q.get("cursor") or [None])[0],
+                        unresolved_only=(q.get("status") or ["all"])[0] == "unresolved")
+                except S1ApiError as exc:
+                    return self._json({"error": f"콘솔 조회 실패: {exc}"}, HTTPStatus.BAD_GATEWAY)
+                return self._json({"source": "console", "items": [threat_row(t, store) for t in threats],
+                                   "next_cursor": cursor, "total": total})
             if path == "/api/analyses":
                 return self._json(store.list_analyses())
             if path.startswith("/api/analyses/"):
@@ -194,10 +259,10 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
 
 
 def build_server(report_dir: str, host: str = "127.0.0.1", port: int = 8080,
-                 status: Optional[Dict[str, Any]] = None, settings=None) -> ThreadingHTTPServer:
+                 status: Optional[Dict[str, Any]] = None, settings=None, client_factory=None) -> ThreadingHTTPServer:
     from .jobs import JobManager
 
-    jobs = JobManager(report_dir, settings)
+    jobs = JobManager(report_dir, settings, **({"client_factory": client_factory} if client_factory else {}))
     return ThreadingHTTPServer((host, port), make_handler(ReportStore(report_dir), status, jobs))
 
 
