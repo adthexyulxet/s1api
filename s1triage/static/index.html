@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S1 DV 트리아지</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e4e7ec;
+    --accent: #5b4bdb; --sel: #eeebff;
+    --high: #c8322f; --high-bg: #fdecec; --med: #b26a00; --med-bg: #fff4e0; --low: #2e7d4f; --low-bg: #e8f5ee;
+    --err: #8a5300; --code: #f2f4f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141a; --panel: #1a1d25; --text: #e6e8ee; --muted: #98a2b3; --line: #2b2f3a;
+      --accent: #9d93ff; --sel: #262340;
+      --high: #ff7b72; --high-bg: #3a1d1d; --med: #f0b35a; --med-bg: #3a2c14; --low: #6fcf97; --low-bg: #16301f;
+      --err: #f0b35a; --code: #222632;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  #status { color: var(--muted); font-size: 12px; }
+  #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  #status.ok .dot { background: var(--low); } #status.bad .dot { background: var(--high); }
+  #viewMonitor { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .n { font-size: 22px; font-weight: 800; } .stat .k { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .toolbar input[type=search] { flex: 1 1 260px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+                                background: var(--panel); color: var(--text); font: inherit; }
+  .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  #threatTable th { position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+  #threatTable td { vertical-align: middle; }
+  #threatTable tr:hover td { background: var(--sel); }
+  .tid { font-family: Consolas, ui-monospace, monospace; font-size: 12px; white-space: nowrap; }
+  .runbtn { font-size: 12px; padding: 3px 10px; margin-left: 6px; white-space: nowrap; }
+  .tname { font-weight: 600; } .sub { color: var(--muted); font-size: 12px; word-break: break-all; }
+  .pill { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--code); color: var(--muted); white-space: nowrap; }
+  .chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px;
+          padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; white-space: nowrap; }
+  .HIGH { color: var(--high); background: var(--high-bg); } .MEDIUM { color: var(--med); background: var(--med-bg); }
+  .LOW { color: var(--low); background: var(--low-bg); }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  h2 { font-size: 20px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h3 { font-size: 14px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 13px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-all; }
+  .summary li { margin: 3px 0; }
+  .hl { border: 1px solid var(--line); border-left: 4px solid var(--high); border-radius: 6px;
+        background: var(--panel); padding: 10px 14px; margin-bottom: 10px; }
+  .hl .t { font-weight: 700; } .hl .tech { color: var(--muted); font-size: 12px; margin-left: 6px; font-weight: 400; }
+  .hl .m { margin: 4px 0; }
+  .hl .ev { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+            padding: 3px 8px; border-radius: 4px; margin-top: 4px; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.time { white-space: nowrap; color: var(--muted); font-family: Consolas, ui-monospace, monospace; font-size: 12px; }
+  td.desc { word-break: break-all; }
+  tr.risky td.desc { color: var(--high); font-weight: 600; }
+  .cnt { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .ioc { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ioc span { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+              padding: 2px 8px; border-radius: 4px; word-break: break-all; }
+  .error { color: var(--err); background: var(--med-bg); padding: 8px 12px; border-radius: 6px; margin-top: 12px; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  nav { display: flex; gap: 4px; }
+  nav button { border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+               padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  nav button.on { color: var(--accent); background: var(--sel); }
+  .hidden { display: none !important; }
+  #viewAnalyze { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 17px; }
+  .form { display: grid; grid-template-columns: max-content 1fr; gap: 12px 16px; align-items: center; margin-top: 14px; }
+  .form label.l { color: var(--muted); font-size: 13px; }
+  .form input[type=text], .form input[type=number] { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+               background: var(--bg); color: var(--text); font: inherit; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 6px;
+         padding: 7px 14px; font: inherit; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .opt { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+  .opt .muted { font-size: 12px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  #jobLog { font-family: Consolas, ui-monospace, monospace; font-size: 12px; background: var(--code);
+            border-radius: 6px; padding: 10px 12px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 6px 0 14px; }
+  .tabs button { border: 0; background: none; color: var(--muted); font: inherit; padding: 8px 12px; cursor: pointer;
+                 border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button.on { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
+  .doc { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.7; }
+  .doc .h1 { font-size: 18px; font-weight: 700; margin: 4px 0 8px; }
+  .doc .h2 { font-size: 15px; font-weight: 700; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .note { font-family: Consolas, ui-monospace, monospace; font-size: 12.5px; background: var(--code); border-radius: 6px;
+          padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+  .verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 18px; font-weight: 800; }
+  .verdict .v { padding: 4px 12px; border-radius: 6px; }
+  .v.tp { color: var(--high); background: var(--high-bg); } .v.chk { color: var(--med); background: var(--med-bg); }
+  .v.fp { color: var(--low); background: var(--low-bg); } .v.hold { color: var(--muted); background: var(--code); }
+  .chain { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+  .chain div { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+  .chain div.hit { border-color: var(--high); color: var(--text); background: var(--high-bg); }
+  .chain div b { display: block; font-size: 12.5px; }
+  .recent .r { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+  .recent .r:hover { color: var(--accent); }
+  @media (max-width: 760px) {
+    .form { grid-template-columns: 1fr; }
+    #viewAnalyze { padding: 12px; }
+    #viewMonitor { padding: 12px; }
+    header { padding: 10px 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>SentinelOne DV 트리아지</h1>
+  <nav><button id="navMonitor" class="on">📋 이벤트 대시보드</button><button id="navAnalyze">🛡️ 정밀 분석</button></nav>
+  <div id="status"><span class="dot"></span><span id="statusText">불러오는 중…</span></div>
+</header>
+<div id="viewMonitor">
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="위협 이름, 호스트, Threat ID, 파일 경로 검색 (불러온 목록 안에서)">
+    <button class="chip on" data-status="all">전체</button>
+    <button class="chip" data-status="unresolved">미해결만</button>
+    <button class="btn" id="reload">새로고침</button>
+    <span class="muted" id="listInfo"></span>
+  </div>
+  <div class="tablewrap">
+    <table id="threatTable">
+      <thead><tr><th>탐지 시각</th><th>위협</th><th>엔드포인트</th><th>분류 / 신뢰도</th><th>상태</th><th>분석 결과</th><th>Threat ID</th></tr></thead>
+      <tbody id="threatRows"><tr><td colspan="7" class="empty">불러오는 중…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="row" style="justify-content:center;margin-top:12px"><button class="btn hidden" id="more">더 보기</button></div>
+</div>
+<div id="viewAnalyze" class="hidden">
+  <div class="card">
+    <h2>🛡️ 정밀 분석 <span class="muted" style="font-size:13px;font-weight:400">해설서 · 콘솔 Notes 초안 · 근본원인/킬체인 요약 포함</span></h2>
+    <div class="form">
+      <label class="l" for="aId">Threat ID</label>
+      <div class="row">
+        <input id="aId" type="text" placeholder="예: 2604266661056814661" style="flex:1;min-width:220px">
+      </div>
+      <label class="l">옵션</label>
+      <div>
+        <label class="opt"><input type="checkbox" id="aRefresh" checked><span>DV 새로 조회<br><span class="muted">끄면 저장된 리포트로만 분석합니다 (토큰 불필요).</span></span></label>
+        <label class="opt" style="margin-top:8px"><input type="checkbox" id="aTi" checked><span>🌐 온라인 위협인텔 조회 (VirusTotal · AbuseIPDB)<br><span class="muted">.env 에 API 키가 있을 때만 동작합니다. 해시·IP·도메인이 외부 서비스로 전송됩니다.</span></span></label>
+      </div>
+      <label class="l">AI</label>
+      <div>
+        <label class="opt"><input type="checkbox" id="aAi"><span>🤖 AI 참고 판정 사용 (Claude)<br><span class="muted" id="aAiHint">분석 결과를 Claude 에 보내 정탐/오탐 판단과 후속 조치 가이드를 받습니다. 위협 정보·행위 타임라인(명령줄·경로·IP·호스트명)·IOC 가 Anthropic 으로 전송됩니다.</span></span></label>
+      </div>
+      <label class="l" for="aTimeout">시간 한도</label>
+      <div class="row"><input id="aTimeout" type="number" min="30" max="1800" value="300" style="width:100px"> <span class="muted">초 (DV 쿼리 대기 한도)</span></div>
+      <span></span>
+      <div class="row"><button class="btn primary" id="aRun">분석 실행</button><span id="aMsg" class="muted"></span></div>
+    </div>
+    <div class="hint">메인 보고서 외에 초보자용 해설서 · 콘솔 Notes 붙여넣기 초안 · 구조화된 결론 요약(킬체인 포함) · 기계판독용 analysis_*.json 을 함께 만들어 탭으로 보여줍니다. 판정은 규칙 기반 추정이며 최종 판단은 분석가가 합니다.</div>
+    <div id="jobLog" class="hidden"></div>
+  </div>
+  <div class="card" id="aResult"><div class="empty">Threat ID 를 넣고 정밀 분석을 실행하세요.</div></div>
+  <div class="card recent"><h3 style="margin-top:0">🕐 최근 결과</h3><div id="aRecent" class="muted">없음</div></div>
+</div>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+let threats = [], nextCursor = null, statusFilter = "all", source = "console";
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k === "onclick") n.onclick = v; else n.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false)
+    n.append(c instanceof Node ? c : String(c));
+  return n;
+}
+function fmtTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("ko-KR", { hour12: false });
+}
+function badge(risk) {
+  const lv = (risk && risk.level) || "LOW";
+  return el("span", { class: "badge " + lv }, lv + (risk && risk.score !== undefined ? " " + risk.score : ""));
+}
+
+async function loadStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const box = $("#status");
+    canQuery = !!s.can_query;
+    $("#aAi").disabled = !s.ai_available;
+    if (!s.ai_available) { $("#aAi").checked = false; $("#aAiHint").textContent = ".env 에 ANTHROPIC_API_KEY 를 넣고 pip install -r requirements.txt 후 다시 실행하면 사용할 수 있습니다."; }
+    $("#aRefresh").disabled = !canQuery;
+    if (!canQuery) $("#aRefresh").checked = false;
+    if (!s.monitoring) {
+      box.className = canQuery ? "ok" : "";
+      $("#statusText").textContent = canQuery ? "콘솔 연결됨 · 버튼을 눌러 심층 분석" : "보기 전용 (토큰 없음) · 저장된 리포트만 표시";
+    } else if (s.last_error) {
+      box.className = "bad"; $("#statusText").textContent = "조회 오류: " + s.last_error.slice(0, 80);
+    } else {
+      box.className = "ok";
+      $("#statusText").textContent = "자동 분석 중 · 마지막 조회 " + fmtTime(s.last_poll_at) + " · 분석 " + s.analyzed + "건";
+    }
+  } catch (e) { $("#status").className = "bad"; $("#statusText").textContent = "서버에 연결할 수 없습니다"; }
+}
+
+// ------------------------------------------------------------ 이벤트 대시보드
+const VERDICT_KO = { true_positive: "정탐", false_positive: "오탐", suspicious: "의심", undefined: "미지정" };
+const INCIDENT_KO = { unresolved: "미해결", in_progress: "진행 중", resolved: "해결됨" };
+const MITIGATION_KO = { not_mitigated: "미조치", mitigated: "조치됨", marked_as_benign: "정상 처리", active: "활성", blocked: "차단됨" };
+const ko = (map, v) => v ? (map[v] || v) : "-";
+
+async function loadThreats(append) {
+  const btn = $("#more");
+  if (!append) { nextCursor = null; $("#listInfo").textContent = "불러오는 중…"; }
+  const qs = new URLSearchParams({ limit: "100", status: statusFilter });
+  if (append && nextCursor) qs.set("cursor", nextCursor);
+  let data;
+  try {
+    const res = await fetch("/api/threats?" + qs);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "조회 실패");
+  } catch (e) { $("#listInfo").textContent = "오류: " + e.message; return; }
+  source = data.source;
+  threats = append ? threats.concat(data.items) : data.items;
+  nextCursor = data.next_cursor;
+  btn.classList.toggle("hidden", !nextCursor);
+  $("#listInfo").textContent = (source === "saved" ? "저장된 리포트 " : "콘솔 ") + threats.length + "건" +
+    (data.total ? " / 전체 " + data.total + "건" : "") + " · " + new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  renderThreats();
+}
+
+function renderStats() {
+  const n = (f) => threats.filter(f).length;
+  const items = [
+    ["불러온 위협", threats.length],
+    ["미해결", n(t => t.incident_status === "unresolved")],
+    ["malicious", n(t => (t.confidence_level || "") === "malicious")],
+    ["심층 분석 완료", n(t => t.analysis)],
+    ["정탐 추정", n(t => t.analysis && (t.analysis.verdict === "정탐 가능성 높음" || t.analysis.ai_verdict === "정탐"))],
+  ];
+  $("#stats").replaceChildren(...items.map(([k, v]) => el("div", { class: "stat" }, el("div", { class: "n" }, v), el("div", { class: "k" }, k))));
+}
+
+function analysisCell(t) {
+  if (!t.analysis) return el("span", { class: "muted" }, "-");
+  const a = t.analysis;
+  return el("div", {},
+    el("span", { class: "badge v " + verdictClass(a.verdict) }, a.verdict || "-"),
+    a.ai_verdict ? [" ", el("span", { class: "badge v " + aiClass(a.ai_verdict) }, "AI " + a.ai_verdict)] : null,
+    el("div", {}, el("a", { href: "#", onclick: (e) => { e.preventDefault(); showView("analyze"); openAnalysis(t.id); } }, "결과 보기")));
+}
+
+function renderThreats() {
+  renderStats();
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = threats.filter(t => !q || [t.name, t.agent_name, t.id, t.file_path, t.storyline_id, t.sha1]
+    .some(v => (v || "").toLowerCase().includes(q)));
+  const body = $("#threatRows");
+  if (!rows.length) {
+    body.replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "empty" },
+      threats.length ? "검색 조건에 맞는 위협이 없습니다." : (source === "saved" ? "저장된 리포트가 없습니다." : "콘솔에 위협이 없습니다."))));
+    return;
+  }
+  body.replaceChildren(...rows.map(t => el("tr", {},
+    el("td", { class: "time" }, fmtTime(t.created_at)),
+    el("td", {}, el("div", { class: "tname" }, t.name || "-"), t.file_path ? el("div", { class: "sub" }, t.file_path) : null),
+    el("td", {}, t.agent_name || "-", t.os ? el("div", { class: "sub" }, t.os) : null),
+    el("td", {}, t.classification || "-", el("div", { class: "sub" }, t.confidence_level || "-")),
+    el("td", {}, el("span", { class: "pill" }, ko(INCIDENT_KO, t.incident_status)), " ",
+      el("span", { class: "pill" }, ko(MITIGATION_KO, t.mitigation_status)),
+      t.analyst_verdict && t.analyst_verdict !== "undefined" ? el("div", { class: "sub" }, "분석가: " + ko(VERDICT_KO, t.analyst_verdict)) : null),
+    el("td", {}, analysisCell(t)),
+    el("td", {}, el("span", { class: "tid" }, t.id),
+      el("button", { class: "btn primary runbtn", title: "이 위협을 바로 심층 분석합니다",
+        onclick: () => startDeepAnalysis(t) }, "🛡️ 심층 분석")))));
+}
+
+function startDeepAnalysis(t) {
+  $("#aId").value = t.id;
+  if (!canQuery) $("#aRefresh").checked = false;
+  showView("analyze");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  runAnalysis();
+}
+
+// ------------------------------------------------------------ 정밀 분석
+let canQuery = false, currentAnalysis = null, currentTab = "conclusion";
+function showView(name) {
+  $("#viewMonitor").classList.toggle("hidden", name !== "monitor");
+  $("#viewAnalyze").classList.toggle("hidden", name !== "analyze");
+  $("#navMonitor").classList.toggle("on", name === "monitor");
+  $("#navAnalyze").classList.toggle("on", name === "analyze");
+  if (name === "analyze") loadRecent();
+}
+$("#navMonitor").onclick = () => showView("monitor");
+$("#navAnalyze").onclick = () => showView("analyze");
+
+function verdictClass(v) {
+  return v === "정탐 가능성 높음" ? "tp" : v === "오탐 가능성 높음" ? "fp" : v === "추가 확인 필요" ? "chk" : "hold";
+}
+async function loadRecent() {
+  let rows = [];
+  try { rows = await (await fetch("/api/analyses")).json(); } catch (e) { return; }
+  const box = $("#aRecent");
+  if (!rows.length) { box.textContent = "아직 정밀 분석 결과가 없습니다."; return; }
+  box.replaceChildren(...rows.map(r => el("div", { class: "r", onclick: () => openAnalysis(r.id) },
+    el("span", { class: "badge v " + verdictClass(r.verdict) }, r.verdict || "-"),
+    r.ai_verdict ? el("span", { class: "badge v " + aiClass(r.ai_verdict) }, "AI " + r.ai_verdict) : null,
+    el("b", {}, r.name || "-"), el("span", { class: "muted" }, (r.agent_name || "-") + " · " + fmtTime(r.analyzed_at) + " · " + r.id))));
+}
+async function openAnalysis(id) {
+  const res = await fetch("/api/analyses/" + encodeURIComponent(id));
+  if (!res.ok) return;
+  currentAnalysis = await res.json(); currentTab = "conclusion";
+  $("#aId").value = id;
+  renderAnalysis();
+}
+async function runAnalysis() {
+  const id = $("#aId").value.trim();
+  if (!id) { $("#aMsg").textContent = "Threat ID 를 입력하세요."; return; }
+  if ($("#aRun").disabled) { $("#aMsg").textContent = "이미 분석이 진행 중입니다. 끝난 뒤 다시 눌러 주세요."; return; }
+  $("#aRun").disabled = true; $("#aMsg").textContent = "분석 요청 중… (" + id + ")";
+  const log = $("#jobLog"); log.classList.remove("hidden"); log.textContent = "";
+  let job;
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-S1Triage": "1" },
+      body: JSON.stringify({ threat_id: id, refresh: $("#aRefresh").checked, use_ti: $("#aTi").checked, use_ai: $("#aAi").checked, timeout: Number($("#aTimeout").value) || 300 }) });
+    job = await res.json();
+    if (!res.ok) throw new Error(job.error || "요청 실패");
+  } catch (e) { $("#aMsg").textContent = "오류: " + e.message; $("#aRun").disabled = false; return; }
+  $("#aMsg").textContent = "분석 중… (DV 쿼리는 수십 초 걸릴 수 있습니다)";
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    try { job = await (await fetch("/api/jobs/" + job.id)).json(); } catch (e) { continue; }
+    log.textContent = (job.logs || []).join("\n"); log.scrollTop = log.scrollHeight;
+    if (job.status === "done" || job.status === "error") break;
+  }
+  $("#aRun").disabled = false;
+  if (job.status === "error") { $("#aMsg").textContent = "실패: " + job.error; return; }
+  $("#aMsg").textContent = "완료";
+  await openAnalysis(id); loadRecent();
+  const t = threats.find(x => x.id === id);  // 대시보드의 분석 결과 칸 갱신
+  if (t) { const a = currentAnalysis || {}; t.analysis = { verdict: (a.conclusion || {}).verdict, risk: (a.conclusion || {}).risk,
+    ai_verdict: a.ai_verdict && !a.ai_verdict.error ? a.ai_verdict.verdict : null, analyzed_at: a.analyzed_at }; renderThreats(); }
+}
+$("#aRun").onclick = runAnalysis;
+$("#aId").onkeydown = (e) => { if (e.key === "Enter") runAnalysis(); };
+
+function renderDoc(text) {
+  const box = el("div", { class: "doc" });
+  for (const line of (text || "").split("\n")) {
+    if (line.startsWith("# ")) box.append(el("div", { class: "h1" }, line.slice(2)));
+    else if (line.startsWith("## ")) box.append(el("div", { class: "h2" }, line.slice(3)));
+    else box.append(line + "\n");
+  }
+  return box;
+}
+const IOC_LABELS = { ips: "외부 IP", domains: "도메인", sha256: "SHA256", sha1: "SHA1", md5: "MD5" };
+const KILLCHAIN = ["초기 침투", "실행", "지속성", "권한 상승", "방어 회피", "인증정보 접근", "탐색", "측면 이동", "수집", "명령제어(C2)", "유출", "영향"];
+function renderConclusion(a) {
+  const c = a.conclusion || {}, t = (a.report || {}).threat || {};
+  const hit = Object.fromEntries((c.kill_chain || []).map(k => [k.tactic, k.items]));
+  const iocs = Object.entries(c.key_iocs || {});
+  return el("div", {},
+    el("div", { class: "verdict" }, el("span", { class: "v " + verdictClass(c.verdict) }, c.verdict || "-"),
+      el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "신뢰도 " + (c.confidence || "-") + " · 위험도 " + ((c.risk || {}).level || "-") + " " + ((c.risk || {}).score ?? ""))),
+    el("p", { class: "muted" }, (t.name || "-") + " · " + (t.agent_name || "-") + " · 분석 " + fmtTime(a.analyzed_at)),
+    a.ai_verdict && !a.ai_verdict.error ? el("p", {}, el("span", { class: "badge v " + aiClass(a.ai_verdict.verdict) }, "🤖 AI: " + a.ai_verdict.verdict),
+      " " + (a.ai_verdict.summary || ""), " ", el("a", { href: "#", onclick: (e) => { e.preventDefault(); currentTab = "ai"; renderAnalysis(); } }, "자세히")) : null,
+    a.ai_verdict && a.ai_verdict.error ? el("div", { class: "error" }, "AI 참고 판정 실패: " + a.ai_verdict.error) : null,
+    el("h3", {}, "판정 근거"), el("ul", { class: "summary" }, (c.reasons || []).map(x => el("li", {}, x))),
+    el("h3", {}, "근본원인 요약"), el("ul", { class: "summary" }, (c.root_cause || []).map(x => el("li", {}, x))),
+    el("h3", {}, "킬체인 (MITRE ATT&CK 전술)"),
+    el("div", { class: "chain" }, KILLCHAIN.map(k => el("div", { class: hit[k] ? "hit" : "" }, el("b", {}, k), hit[k] ? hit[k].join(", ") : "-"))),
+    el("h3", {}, "핵심 IOC"),
+    iocs.length ? iocs.map(([k, v]) => el("p", {}, el("div", { class: "muted" }, IOC_LABELS[k] || k), el("div", { class: "ioc" }, v.map(x => el("span", {}, x)))))
+                : el("p", { class: "muted" }, "추출된 IOC 가 없습니다."),
+    el("h3", {}, "후속 조치 가이드"), el("ol", { class: "summary" }, (c.actions || []).map(x => el("li", {}, x))),
+    el("p", { class: "muted" }, "※ " + (c.disclaimer || "")));
+}
+function aiClass(v) { return v === "정탐" ? "tp" : v === "오탐" ? "fp" : "hold"; }
+function renderAi(ai) {
+  if (!ai) return el("p", { class: "muted" }, "AI 참고 판정을 사용하지 않았습니다.");
+  if (ai.error) return el("div", { class: "error" }, "AI 참고 판정 실패: " + ai.error);
+  const list = (title, items, tag) => items && items.length ? [el("h3", {}, title), el(tag || "ul", { class: "summary" }, items.map(x => el("li", {}, x)))] : [];
+  return el("div", {},
+    el("div", { class: "verdict" }, el("span", { class: "v " + aiClass(ai.verdict) }, "AI: " + ai.verdict),
+      el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "신뢰도 " + ai.confidence + " · " + ai.model)),
+    el("p", {}, ai.summary),
+    el("h3", {}, "무슨 일이 있었나 (AI 서술)"), el("p", { class: "doc" }, ai.attack_narrative),
+    list("판정 근거", ai.reasoning), list("오탐 가능성 검토", ai.false_positive_considerations),
+    list("권장 조치", ai.recommended_actions, "ol"), list("분석가 확인 사항", ai.questions_for_analyst),
+    el("p", { class: "muted" }, "※ AI 참고 의견입니다. 규칙 기반 결론과 근거 데이터를 함께 보고 분석가가 최종 판단하세요."));
+}
+function renderAnalysis() {
+  const a = currentAnalysis; if (!a) return;
+  const tabs = [["conclusion", "결론 요약"], ...(a.ai_verdict ? [["ai", "🤖 AI 참고 판정"]] : []), ["main", "메인 보고서"], ["guide", "초보자용 해설서"], ["note", "콘솔 Notes 초안"], ["json", "analysis.json"]];
+  let body;
+  if (currentTab === "conclusion") body = renderConclusion(a);
+  else if (currentTab === "ai") body = renderAi(a.ai_verdict);
+  else if (currentTab === "main") body = renderDoc(a.main_report);
+  else if (currentTab === "guide") body = renderDoc(a.beginner_guide);
+  else if (currentTab === "note") {
+    const msg = el("span", { class: "muted" });
+    body = el("div", {}, el("div", { class: "row", style: "margin-bottom:10px" },
+      el("button", { class: "btn primary", onclick: async () => {
+        try { await navigator.clipboard.writeText(a.console_note); msg.textContent = "복사했습니다. 콘솔의 Threat > Notes 에 붙여넣으세요."; }
+        catch (e) { msg.textContent = "복사 실패: 아래 내용을 직접 선택해 복사하세요."; } } }, "복사"), msg),
+      el("div", { class: "note" }, a.console_note || ""));
+  } else {
+    const text = JSON.stringify(a, null, 2);
+    body = el("div", {}, el("div", { class: "row", style: "margin-bottom:10px" },
+      el("button", { class: "btn", onclick: () => {
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        const link = el("a", { href: url, download: "analysis_" + (((a.report || {}).threat || {}).id || "result") + ".json" });
+        document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, "JSON 다운로드")), el("div", { class: "note", style: "max-height:520px;overflow:auto" }, text));
+  }
+  $("#aResult").replaceChildren(
+    el("div", { class: "tabs" }, tabs.map(([k, label]) => el("button", { class: k === currentTab ? "on" : "", onclick: () => { currentTab = k; renderAnalysis(); } }, label))),
+    body);
+}
+
+document.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+  statusFilter = c.dataset.status;
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c));
+  loadThreats(false);
+});
+$("#q").oninput = renderThreats;
+$("#reload").onclick = () => loadThreats(false);
+$("#more").onclick = () => loadThreats(true);
+loadStatus(); loadThreats(false);
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>

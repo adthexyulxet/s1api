@@ -1,0 +1,165 @@
+import json
+import threading
+import urllib.error
+import urllib.request
+
+import pytest
+
+from s1triage.analyzer import analyze_events
+from s1triage.client import Threat
+from s1triage.report import TriageReport
+from s1triage.web import build_server
+
+from .conftest import threat_payload
+
+
+@pytest.fixture
+def server(tmp_path):
+    events = [{"eventType": "File Modification", "srcProcName": "bash",
+               "tgtFilePath": "/root/.ssh/authorized_keys", "createdAt": "2026-11-03T01:00:00Z"}]
+    TriageReport(Threat.from_api(threat_payload("111")), analyze_events(events)).save(str(tmp_path))
+    TriageReport(Threat.from_api(threat_payload("222", created="2026-11-03T12:00:00Z")), None, error="boom").save(str(tmp_path))
+    (tmp_path / "threat_bad.json").write_text("{not json")
+    status = {"last_poll_at": "2026-11-03T12:00:00+00:00", "last_error": None, "analyzed": 2, "polls": 1}
+    srv = build_server(str(tmp_path), "127.0.0.1", 0, status)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def get(url):
+    with urllib.request.urlopen(url) as r:
+        return r.status, r.headers.get("Content-Type"), r.read()
+
+
+def test_index_served(server):
+    code, ctype, body = get(server + "/")
+    assert code == 200 and ctype.startswith("text/html")
+    assert "SentinelOne DV 트리아지".encode() in body
+
+
+def test_report_list_sorted_and_summarized(server):
+    _, _, body = get(server + "/api/reports")
+    items = json.loads(body)
+    assert [i["id"] for i in items] == ["222", "111"]  # 최신 위협 먼저, 깨진 파일은 무시
+    assert "SSH 키 등록(백도어)" in items[1]["highlights"]
+    assert items[0]["error"] == "boom"
+
+
+def test_report_detail_and_status(server):
+    _, _, body = get(server + "/api/reports/111")
+    detail = json.loads(body)
+    assert detail["dv"]["behavior"]["timeline"][0]["description"].endswith("authorized_keys")
+    status = json.loads(get(server + "/api/status")[2])
+    assert status["monitoring"] is True and status["analyzed"] == 2
+
+
+@pytest.mark.parametrize("bad", ["../../etc/passwd", "..%2F..%2Fsecret", "nope"])
+def test_unknown_or_traversal_ids_404(server, bad):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        get(server + "/api/reports/" + bad)
+    assert exc.value.code == 404
+
+
+def post(url, body, headers=None):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **(headers or {})})
+    with urllib.request.urlopen(req) as r:
+        return r.status, json.loads(r.read())
+
+
+def test_analyze_requires_csrf_header_and_same_origin(server):
+    for headers in ({}, {"X-S1Triage": "1", "Origin": "http://evil.example.com"}):
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            post(server + "/api/analyze", {"threat_id": "111", "refresh": False}, headers)
+        assert exc.value.code == 403
+
+
+def test_analyze_saved_report_end_to_end(server):
+    import time
+    code, job = post(server + "/api/analyze", {"threat_id": "111", "refresh": False}, {"X-S1Triage": "1"})
+    assert code == 202
+    for _ in range(100):
+        job = json.loads(get(server + "/api/jobs/" + job["id"])[2])
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert job["status"] == "done", job
+    recent = json.loads(get(server + "/api/analyses")[2])
+    assert recent[0]["id"] == "111" and recent[0]["verdict"]
+    detail = json.loads(get(server + "/api/analyses/111")[2])
+    assert {"conclusion", "main_report", "beginner_guide", "console_note", "report"} <= set(detail)
+
+
+def test_analyze_rejects_bad_input(server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        post(server + "/api/analyze", {"threat_id": "../x"}, {"X-S1Triage": "1"})
+    assert exc.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as exc:  # 보기 전용 서버는 DV 재조회 불가
+        post(server + "/api/analyze", {"threat_id": "111", "refresh": True}, {"X-S1Triage": "1"})
+    assert exc.value.code == 400
+
+
+def test_threats_from_saved_reports_without_token(server):
+    data = json.loads(get(server + "/api/threats")[2])
+    assert data["source"] == "saved"
+    assert [i["id"] for i in data["items"]] == ["222", "111"]
+    assert data["items"][1]["has_report"] is True and data["items"][1]["analysis"] is None
+
+
+def test_threats_from_console_with_pagination_and_analysis_join(tmp_path, settings, fixed_now):
+    from s1triage.client import S1Client
+    from s1triage.jobs import save_analysis
+
+    from .conftest import FakeResponse, FakeSession
+    from .test_narrative import ATTACK, report
+
+    t1 = threat_payload("901")
+    t1["threatInfo"].update({"incidentStatus": "unresolved", "mitigationStatus": "not_mitigated", "filePath": "/tmp/x"})
+    session = FakeSession({("GET", "/threats"): [
+        FakeResponse(200, {"data": [t1, threat_payload("902")], "pagination": {"nextCursor": "c2", "totalItems": 3}}),
+        FakeResponse(200, {"data": [threat_payload("903")], "pagination": {"nextCursor": None, "totalItems": 3}}),
+    ]})
+    r = report(ATTACK)
+    r["threat"]["id"] = "901"
+    save_analysis(str(tmp_path), r, {})
+    srv = build_server(str(tmp_path), "127.0.0.1", 0, None, settings,
+                       client_factory=lambda s: S1Client(s, session=session, sleep=lambda x: None, now=fixed_now))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        page1 = json.loads(get(base + "/api/threats?status=unresolved&limit=2")[2])
+        assert page1["source"] == "console" and page1["next_cursor"] == "c2" and page1["total"] == 3
+        first = page1["items"][0]
+        assert first["id"] == "901" and first["incident_status"] == "unresolved" and first["file_path"] == "/tmp/x"
+        assert first["analysis"]["verdict"] == "정탐 가능성 높음"
+        assert page1["items"][1]["analysis"] is None
+        params = session.calls[0][2]["params"]
+        assert params["resolved"] == "false" and params["limit"] == 2 and "cursor" not in params
+        page2 = json.loads(get(base + "/api/threats?cursor=c2")[2])
+        assert [i["id"] for i in page2["items"]] == ["903"]
+        assert session.calls[1][2]["params"]["cursor"] == "c2" and "resolved" not in session.calls[1][2]["params"]
+        status = json.loads(get(base + "/api/status")[2])
+        assert status["can_query"] is True and status["monitoring"] is False
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_threats_console_error_is_502(tmp_path, settings, fixed_now):
+    from s1triage.client import S1Client
+
+    from .conftest import FakeResponse, FakeSession
+
+    session = FakeSession({("GET", "/threats"): FakeResponse(401, {"errors": ["bad token"]})})
+    srv = build_server(str(tmp_path), "127.0.0.1", 0, None, settings,
+                       client_factory=lambda s: S1Client(s, session=session, sleep=lambda x: None, now=fixed_now))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            get(f"http://127.0.0.1:{srv.server_address[1]}/api/threats")
+        assert exc.value.code == 502
+    finally:
+        srv.shutdown()
+        srv.server_close()
