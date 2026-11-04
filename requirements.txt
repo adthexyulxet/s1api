@@ -1,3 +1,4 @@
 requests>=2.28
 # AI 참고 판정(선택): Claude API
 anthropic>=2.4
+pyzipper>=0.3.6  # 격리 ZIP(AES 암호화) 해제용
