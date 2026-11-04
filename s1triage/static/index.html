@@ -156,6 +156,10 @@
         <label class="opt"><input type="checkbox" id="aRefresh" checked><span>DV 새로 조회<br><span class="muted">끄면 저장된 리포트로만 분석합니다 (토큰 불필요).</span></span></label>
         <label class="opt" style="margin-top:8px"><input type="checkbox" id="aTi" checked><span>🌐 온라인 위협인텔 조회 (VirusTotal · AbuseIPDB)<br><span class="muted">.env 에 API 키가 있을 때만 동작합니다. 해시·IP·도메인이 외부 서비스로 전송됩니다.</span></span></label>
       </div>
+      <label class="l">AI</label>
+      <div>
+        <label class="opt"><input type="checkbox" id="aAi"><span>🤖 AI 참고 판정 사용 (Claude)<br><span class="muted" id="aAiHint">분석 결과를 Claude 에 보내 정탐/오탐 판단과 후속 조치 가이드를 받습니다. 위협 정보·행위 타임라인(명령줄·경로·IP·호스트명)·IOC 가 Anthropic 으로 전송됩니다.</span></span></label>
+      </div>
       <label class="l" for="aTimeout">시간 한도</label>
       <div class="row"><input id="aTimeout" type="number" min="30" max="1800" value="300" style="width:100px"> <span class="muted">초 (DV 쿼리 대기 한도)</span></div>
       <span></span>
@@ -196,6 +200,8 @@ async function loadStatus() {
     const s = await (await fetch("/api/status")).json();
     const box = $("#status");
     canQuery = !!s.can_query;
+    $("#aAi").disabled = !s.ai_available;
+    if (!s.ai_available) { $("#aAi").checked = false; $("#aAiHint").textContent = ".env 에 ANTHROPIC_API_KEY 를 넣고 pip install -r requirements.txt 후 다시 실행하면 사용할 수 있습니다."; }
     $("#aRefresh").disabled = !canQuery;
     if (!canQuery) $("#aRefresh").checked = false;
     if (!s.monitoring) {
@@ -337,6 +343,7 @@ async function loadRecent() {
   if (!rows.length) { box.textContent = "아직 정밀 분석 결과가 없습니다."; return; }
   box.replaceChildren(...rows.map(r => el("div", { class: "r", onclick: () => openAnalysis(r.id) },
     el("span", { class: "badge v " + verdictClass(r.verdict) }, r.verdict || "-"),
+    r.ai_verdict ? el("span", { class: "badge v " + aiClass(r.ai_verdict) }, "AI " + r.ai_verdict) : null,
     el("b", {}, r.name || "-"), el("span", { class: "muted" }, (r.agent_name || "-") + " · " + fmtTime(r.analyzed_at) + " · " + r.id))));
 }
 async function openAnalysis(id) {
@@ -354,7 +361,7 @@ async function runAnalysis() {
   let job;
   try {
     const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-S1Triage": "1" },
-      body: JSON.stringify({ threat_id: id, refresh: $("#aRefresh").checked, use_ti: $("#aTi").checked, timeout: Number($("#aTimeout").value) || 300 }) });
+      body: JSON.stringify({ threat_id: id, refresh: $("#aRefresh").checked, use_ti: $("#aTi").checked, use_ai: $("#aAi").checked, timeout: Number($("#aTimeout").value) || 300 }) });
     job = await res.json();
     if (!res.ok) throw new Error(job.error || "요청 실패");
   } catch (e) { $("#aMsg").textContent = "오류: " + e.message; $("#aRun").disabled = false; return; }
@@ -392,6 +399,9 @@ function renderConclusion(a) {
     el("div", { class: "verdict" }, el("span", { class: "v " + verdictClass(c.verdict) }, c.verdict || "-"),
       el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "신뢰도 " + (c.confidence || "-") + " · 위험도 " + ((c.risk || {}).level || "-") + " " + ((c.risk || {}).score ?? ""))),
     el("p", { class: "muted" }, (t.name || "-") + " · " + (t.agent_name || "-") + " · 분석 " + fmtTime(a.analyzed_at)),
+    a.ai_verdict && !a.ai_verdict.error ? el("p", {}, el("span", { class: "badge v " + aiClass(a.ai_verdict.verdict) }, "🤖 AI: " + a.ai_verdict.verdict),
+      " " + (a.ai_verdict.summary || ""), " ", el("a", { href: "#", onclick: (e) => { e.preventDefault(); currentTab = "ai"; renderAnalysis(); } }, "자세히")) : null,
+    a.ai_verdict && a.ai_verdict.error ? el("div", { class: "error" }, "AI 참고 판정 실패: " + a.ai_verdict.error) : null,
     el("h3", {}, "판정 근거"), el("ul", { class: "summary" }, (c.reasons || []).map(x => el("li", {}, x))),
     el("h3", {}, "근본원인 요약"), el("ul", { class: "summary" }, (c.root_cause || []).map(x => el("li", {}, x))),
     el("h3", {}, "킬체인 (MITRE ATT&CK 전술)"),
@@ -402,11 +412,26 @@ function renderConclusion(a) {
     el("h3", {}, "후속 조치 가이드"), el("ol", { class: "summary" }, (c.actions || []).map(x => el("li", {}, x))),
     el("p", { class: "muted" }, "※ " + (c.disclaimer || "")));
 }
+function aiClass(v) { return v === "정탐" ? "tp" : v === "오탐" ? "fp" : "hold"; }
+function renderAi(ai) {
+  if (!ai) return el("p", { class: "muted" }, "AI 참고 판정을 사용하지 않았습니다.");
+  if (ai.error) return el("div", { class: "error" }, "AI 참고 판정 실패: " + ai.error);
+  const list = (title, items, tag) => items && items.length ? [el("h3", {}, title), el(tag || "ul", { class: "summary" }, items.map(x => el("li", {}, x)))] : [];
+  return el("div", {},
+    el("div", { class: "verdict" }, el("span", { class: "v " + aiClass(ai.verdict) }, "AI: " + ai.verdict),
+      el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "신뢰도 " + ai.confidence + " · " + ai.model)),
+    el("p", {}, ai.summary),
+    el("h3", {}, "무슨 일이 있었나 (AI 서술)"), el("p", { class: "doc" }, ai.attack_narrative),
+    list("판정 근거", ai.reasoning), list("오탐 가능성 검토", ai.false_positive_considerations),
+    list("권장 조치", ai.recommended_actions, "ol"), list("분석가 확인 사항", ai.questions_for_analyst),
+    el("p", { class: "muted" }, "※ AI 참고 의견입니다. 규칙 기반 결론과 근거 데이터를 함께 보고 분석가가 최종 판단하세요."));
+}
 function renderAnalysis() {
   const a = currentAnalysis; if (!a) return;
-  const tabs = [["conclusion", "결론 요약"], ["main", "메인 보고서"], ["guide", "초보자용 해설서"], ["note", "콘솔 Notes 초안"], ["json", "analysis.json"]];
+  const tabs = [["conclusion", "결론 요약"], ...(a.ai_verdict ? [["ai", "🤖 AI 참고 판정"]] : []), ["main", "메인 보고서"], ["guide", "초보자용 해설서"], ["note", "콘솔 Notes 초안"], ["json", "analysis.json"]];
   let body;
   if (currentTab === "conclusion") body = renderConclusion(a);
+  else if (currentTab === "ai") body = renderAi(a.ai_verdict);
   else if (currentTab === "main") body = renderDoc(a.main_report);
   else if (currentTab === "guide") body = renderDoc(a.beginner_guide);
   else if (currentTab === "note") {

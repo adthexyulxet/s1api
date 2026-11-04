@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from .client import S1ApiError, S1Client
 from .config import Settings
 from .enrichment import Enricher
+from .ai_verdict import get_ai_verdict
 from .narrative import build_outputs
 from .state import SeenThreats
 
@@ -53,13 +54,16 @@ def analysis_path(report_dir: str, threat_id: str) -> Path:
     return Path(report_dir) / f"analysis_{threat_id}.json"
 
 
-def save_analysis(report_dir: str, report: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+def save_analysis(report_dir: str, report: Dict[str, Any], options: Dict[str, Any],
+                  ai_verdict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     data = {
         "analyzed_at": _now(),
         "options": options,
         "report": report,
         **build_outputs(report),
     }
+    if ai_verdict is not None:
+        data["ai_verdict"] = ai_verdict
     path = analysis_path(report_dir, str((report.get("threat") or {}).get("id")))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -69,10 +73,12 @@ def save_analysis(report_dir: str, report: Dict[str, Any], options: Dict[str, An
 class JobManager:
     """정밀 분석 요청을 받아 하나씩 순서대로 실행합니다 (DV 레이트리밋 보호)."""
 
-    def __init__(self, report_dir: str, settings: Optional[Settings] = None, client_factory=S1Client):
+    def __init__(self, report_dir: str, settings: Optional[Settings] = None, client_factory=S1Client,
+                 ai_fn=get_ai_verdict):
         self.report_dir = report_dir
         self.settings = settings
         self.client_factory = client_factory
+        self.ai_fn = ai_fn
         self.jobs: Dict[str, Job] = {}
         self._run_lock = threading.Lock()
         self._lock = threading.Lock()
@@ -81,13 +87,15 @@ class JobManager:
     def can_query(self) -> bool:
         return self.settings is not None
 
-    def submit(self, threat_id: str, refresh: bool = True, use_ti: bool = True, timeout: int = 300) -> Job:
+    def submit(self, threat_id: str, refresh: bool = True, use_ti: bool = True, timeout: int = 300,
+               use_ai: bool = False) -> Job:
         timeout = max(MIN_TIMEOUT, min(MAX_TIMEOUT, int(timeout)))
         if refresh and not self.can_query:
             raise ValueError("토큰 없이 실행 중이라 DV 를 새로 조회할 수 없습니다. 저장된 결과로 분석하세요.")
         if not refresh and not (Path(self.report_dir) / f"threat_{threat_id}.json").is_file():
             raise ValueError("이 위협의 저장된 리포트가 없습니다. 'DV 새로 조회'를 켜고 실행하세요.")
-        job = Job(uuid.uuid4().hex[:12], threat_id, {"refresh": refresh, "use_ti": use_ti, "timeout": timeout})
+        job = Job(uuid.uuid4().hex[:12], threat_id,
+                  {"refresh": refresh, "use_ti": use_ti, "timeout": timeout, "use_ai": use_ai})
         with self._lock:
             self.jobs[job.id] = job
             for old in list(self.jobs)[:-MAX_JOBS_KEPT]:
@@ -107,7 +115,15 @@ class JobManager:
             try:
                 report = self._fresh_report(job) if job.options["refresh"] else self._saved_report(job)
                 job.log("[*] 판정·해설서·콘솔 Notes 초안 생성 중...")
-                save_analysis(self.report_dir, report, job.options)
+                ai = None
+                if job.options.get("use_ai"):
+                    job.log("[*] Claude API 로 AI 참고 판정 요청 중... (수십 초 걸릴 수 있습니다)")
+                    ai = self.ai_fn(report, build_outputs(report)["conclusion"])
+                    if ai.get("error"):
+                        job.log(f"[!] AI 참고 판정 실패: {ai['error']}")
+                    else:
+                        job.log(f"[+] AI 참고 판정: {ai.get('verdict')} (신뢰도 {ai.get('confidence')})")
+                save_analysis(self.report_dir, report, job.options, ai)
                 job.log(f"[+] 정밀 분석 완료 ({time.monotonic() - started:.0f}초)")
                 job.status = "done"
             except (S1ApiError, ValueError, OSError) as exc:

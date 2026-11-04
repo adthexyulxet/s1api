@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from .ai_verdict import ai_available
+
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -75,8 +77,10 @@ class ReportStore:
                 continue
             t = (data.get("report") or {}).get("threat") or {}
             c = data.get("conclusion") or {}
+            ai = data.get("ai_verdict") or {}
             items.append({"id": t.get("id"), "name": t.get("name"), "agent_name": t.get("agent_name"),
                           "verdict": c.get("verdict"), "risk": c.get("risk") or {},
+                          "ai_verdict": None if ai.get("error") else ai.get("verdict"),
                           "analyzed_at": data.get("analyzed_at")})
         items.sort(key=lambda r: r.get("analyzed_at") or "", reverse=True)
         return items[:limit]
@@ -143,6 +147,7 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
             if path == "/api/status":
                 return self._json({"monitoring": status is not None, **(status or {}),
                                    "can_query": bool(jobs and jobs.can_query),
+                                   "ai_available": ai_available(),
                                    "report_dir": str(store.dir.resolve())})
             if path == "/api/analyses":
                 return self._json(store.list_analyses())
@@ -179,7 +184,8 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
                 if not SAFE_ID.match(threat_id):
                     raise ValueError("Threat ID 를 확인하세요 (숫자/영문만 가능).")
                 job = jobs.submit(threat_id, refresh=bool(body.get("refresh", True)),
-                                  use_ti=bool(body.get("use_ti", True)), timeout=int(body.get("timeout") or 300))
+                                  use_ti=bool(body.get("use_ti", True)), timeout=int(body.get("timeout") or 300),
+                                  use_ai=bool(body.get("use_ai", False)))
             except (ValueError, TypeError) as exc:
                 return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return self._json(job.to_dict(), HTTPStatus.ACCEPTED)

@@ -65,3 +65,21 @@ def test_unknown_threat_reports_error(tmp_path, settings, fixed_now):
                     client_factory=lambda s: S1Client(s, session=FakeSession(routes), sleep=lambda x: None, now=fixed_now))
     job = wait(jm.submit("404"))
     assert job.status == "error" and "찾을 수 없습니다" in job.error
+
+
+def test_ai_verdict_included_when_requested(tmp_path):
+    (tmp_path / "threat_123.json").write_text(json.dumps(report(ATTACK)), encoding="utf-8")
+    calls = []
+
+    def fake_ai(rep, conclusion):
+        calls.append(conclusion["verdict"])
+        return {"model": "m", "verdict": "정탐", "confidence": "높음"}
+
+    jm = JobManager(str(tmp_path), ai_fn=fake_ai)
+    job = wait(jm.submit("123", refresh=False, use_ai=True))
+    assert job.status == "done", job.logs
+    data = json.loads((tmp_path / "analysis_123.json").read_text(encoding="utf-8"))
+    assert data["ai_verdict"]["verdict"] == "정탐" and calls == ["정탐 가능성 높음"]
+    job = wait(jm.submit("123", refresh=False, use_ai=False))
+    assert "ai_verdict" not in json.loads((tmp_path / "analysis_123.json").read_text(encoding="utf-8"))
+    assert len(calls) == 1
