@@ -173,6 +173,22 @@
   </div>
   <div class="card" id="aResult"><div class="empty">Threat ID 를 넣고 정밀 분석을 실행하세요.</div></div>
   <div class="card recent"><h3 style="margin-top:0">🕐 최근 결과</h3><div id="aRecent" class="muted">없음</div></div>
+  <div class="card">
+    <h2>📦 파일 / 격리 ZIP 정적 분석 <span class="muted" style="font-size:13px;font-weight:400">해시 · 문자열 · PE/ELF 구조 · IOC</span></h2>
+    <div class="form">
+      <label class="l" for="sFile">파일 업로드</label>
+      <div class="row"><input id="sFile" type="file"><span class="muted">또는 수집 ZIP (quarantine/*.zip), 최대 64MB</span></div>
+      <label class="l" for="sPw">ZIP 패스워드</label>
+      <div class="row"><input id="sPw" type="text" autocomplete="off" spellcheck="false" style="width:220px"><span class="muted">암호 없는 ZIP·단일 파일이면 무시됩니다. 틀리면 infected 등 기본값도 시도합니다.</span></div>
+      <label class="l">옵션</label>
+      <div><label class="opt"><input type="checkbox" id="sTi"><span>🌐 SHA256 해시만 VirusTotal 에 조회<br><span class="muted">끄면 아무것도 외부로 보내지 않습니다. .env 에 VT_API_KEY 가 있어야 합니다.</span></span></label></div>
+      <span></span>
+      <div class="row"><button class="btn primary" id="sRun">정적 분석 실행</button><span id="sMsg" class="muted"></span></div>
+    </div>
+    <div class="hint">ZIP 은 디스크에 풀지 않고 메모리에서만 읽으며, 샘플은 절대 실행하지 않습니다. 결과는 sample_*.json 으로 리포트 폴더에 저장됩니다.</div>
+  </div>
+  <div class="card hidden" id="sResult"></div>
+  <div class="card recent"><h3 style="margin-top:0">🕐 최근 파일 분석</h3><div id="sRecent" class="muted">없음</div></div>
 </div>
 <script>
 "use strict";
@@ -306,7 +322,7 @@ function showView(name) {
   $("#viewAnalyze").classList.toggle("hidden", name !== "analyze");
   $("#navMonitor").classList.toggle("on", name === "monitor");
   $("#navAnalyze").classList.toggle("on", name === "analyze");
-  if (name === "analyze") loadRecent();
+  if (name === "analyze") { loadRecent(); loadSamples(); }
 }
 $("#navMonitor").onclick = () => showView("monitor");
 $("#navAnalyze").onclick = () => showView("analyze");
@@ -435,6 +451,104 @@ function renderAnalysis() {
   $("#aResult").replaceChildren(
     el("div", { class: "tabs" }, tabs.map(([k, label]) => el("button", { class: k === currentTab ? "on" : "", onclick: () => { currentTab = k; renderAnalysis(); } }, label))),
     body);
+}
+
+// ------------------------------------------------------------ 파일 / 격리 ZIP 정적 분석
+let currentSample = null, sampleTab = "summary", samplePwLoaded = false;
+function sampleClass(v) { return v === "악성 가능성 높음" ? "tp" : v === "추가 확인 필요" ? "chk" : v === "악성 징후 적음" ? "fp" : "hold"; }
+async function loadSamples() {
+  let d;
+  try { d = await (await fetch("/api/samples")).json(); } catch (e) { return; }
+  if (!samplePwLoaded) { $("#sPw").value = d.default_password || ""; samplePwLoaded = true; }
+  if (!d.can_ti) { $("#sTi").checked = false; $("#sTi").disabled = true; }
+  const box = $("#sRecent"), rows = d.items || [];
+  if (!rows.length) { box.textContent = "아직 파일 분석 결과가 없습니다."; return; }
+  box.replaceChildren(...rows.map(r => el("div", { class: "r", onclick: () => openSample(r.id) },
+    el("span", { class: "badge v " + sampleClass(r.verdict) }, r.verdict || "-"),
+    el("b", {}, r.name || "-"), el("span", { class: "muted" }, (r.type || "-") + " · 파일 " + (r.file_count ?? "-") + "개 · 점수 " + (r.score ?? "-") + " · " + fmtTime(r.analyzed_at)))));
+}
+async function openSample(id) {
+  const res = await fetch("/api/samples/" + encodeURIComponent(id));
+  if (!res.ok) return;
+  currentSample = await res.json(); sampleTab = "summary"; renderSample();
+}
+async function runSample() {
+  const f = $("#sFile").files[0];
+  if (!f) { $("#sMsg").textContent = "파일을 선택하세요."; return; }
+  if (f.size > 64 * 1024 * 1024) { $("#sMsg").textContent = "64MB 를 넘는 파일은 분석할 수 없습니다."; return; }
+  $("#sRun").disabled = true; $("#sMsg").textContent = "업로드·분석 중…";
+  try {
+    const qs = "?use_ti=" + ($("#sTi").checked ? "1" : "0") + "&timeout=" + (Number($("#aTimeout").value) || 300);
+    const res = await fetch("/api/sample" + qs, { method: "POST", body: f, headers: { "Content-Type": "application/octet-stream",
+      "X-S1Triage": "1", "X-Filename": encodeURIComponent(f.name), "X-Zip-Password": encodeURIComponent($("#sPw").value) } });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "요청 실패");
+    currentSample = d; sampleTab = "summary"; renderSample();
+    $("#sMsg").textContent = "완료 (" + d.elapsed_seconds + "초)"; loadSamples();
+  } catch (e) { $("#sMsg").textContent = "오류: " + e.message; }
+  $("#sRun").disabled = false;
+}
+$("#sRun").onclick = runSample;
+function kv(rows) { return el("table", {}, rows.filter(r => r[1] !== undefined && r[1] !== null && r[1] !== "").map(([k, v]) => el("tr", {}, el("th", { style: "width:140px" }, k), el("td", { class: "desc" }, String(v))))); }
+function renderSampleFile(f) {
+  const pe = f.pe, elf = f.elf;
+  const parts = [el("h3", {}, f.name + " "), el("span", { class: "badge v " + sampleClass(f.verdict) }, f.verdict + " · " + f.score),
+    kv([["형식", f.type], ["크기", f.size.toLocaleString() + " bytes"], ["엔트로피", f.entropy], ["MD5", f.md5], ["SHA1", f.sha1], ["SHA256", f.sha256], ["오류", f.parse_error]])];
+  if (pe) {
+    parts.push(el("h3", {}, "PE 구조"), kv([["아키텍처", pe.machine + " " + pe.bits + "bit " + pe.kind], ["서브시스템", pe.subsystem], ["컴파일 시각", pe.compiled_at],
+      ["엔트리포인트", pe.entry_point + " (" + (pe.entry_section || "섹션 밖") + ")"], ["서명", pe.signed ? "있음" : "없음"], [".NET", pe.dotnet ? "예" : "아니오"],
+      ["ASLR / DEP", (pe.aslr ? "on" : "off") + " / " + (pe.dep ? "on" : "off")], ["imphash", pe.imphash], ["오버레이", pe.overlay_size.toLocaleString() + " bytes"]]),
+      el("table", {}, el("tr", {}, ["섹션", "권한", "가상 크기", "raw 크기", "엔트로피"].map(h => el("th", {}, h))),
+        pe.sections.map(x => el("tr", { class: x.entropy >= 7.2 || x.perms === "RWX" ? "risky" : "" }, el("td", {}, x.name), el("td", {}, x.perms), el("td", {}, x.virtual_size), el("td", {}, x.raw_size), el("td", { class: "desc" }, x.entropy)))),
+      el("h3", {}, "임포트 (" + pe.import_count + ")"),
+      ...Object.entries(pe.imports).map(([dll, fns]) => el("p", {}, el("b", {}, dll), el("div", { class: "ioc" }, fns.slice(0, 80).map(x => el("span", {}, x))))));
+    if (pe.exports.length) parts.push(el("h3", {}, "익스포트"), el("div", { class: "ioc" }, pe.exports.slice(0, 80).map(x => el("span", {}, x))));
+  }
+  if (elf) {
+    parts.push(el("h3", {}, "ELF 구조"), kv([["아키텍처", elf.machine + " " + elf.bits + "bit (" + elf.endian + ")"], ["유형", elf.kind], ["엔트리포인트", elf.entry_point],
+      ["인터프리터", elf.interpreter || "없음 (정적 링크)"], ["심볼", elf.stripped ? "제거됨" : "있음"], ["필요 라이브러리", elf.needed.join(", ") || "-"]]),
+      el("table", {}, el("tr", {}, ["섹션", "권한", "크기", "엔트로피"].map(h => el("th", {}, h))),
+        elf.sections.map(x => el("tr", { class: x.entropy >= 7.2 ? "risky" : "" }, el("td", {}, x.name), el("td", {}, x.perms), el("td", {}, x.size), el("td", { class: "desc" }, x.entropy)))));
+  }
+  return el("div", { style: "margin-bottom:24px" }, ...parts);
+}
+const SAMPLE_IOC = { urls: "URL", ips: "IP", domains: "도메인", emails: "이메일", registry: "레지스트리", paths: "파일 경로", btc_wallets: "비트코인 지갑" };
+function renderSample() {
+  const d = currentSample; if (!d) return;
+  const box = $("#sResult"); box.classList.remove("hidden");
+  const tabs = [["summary", "요약"], ["files", "파일별 구조"], ["strings", "문자열·IOC"], ["report", "보고서"], ["json", "sample.json"]];
+  let body;
+  if (sampleTab === "summary") {
+    const s = d.summary || {}, c = d.container || {};
+    body = el("div", {},
+      el("div", { class: "verdict" }, el("span", { class: "v " + sampleClass(s.verdict) }, s.verdict || "-"),
+        el("span", { class: "muted", style: "font-size:13px;font-weight:400" }, "점수 " + s.score + " · 파일 " + s.file_count + "개 · 가장 위험: " + (s.top_file || "-"))),
+      el("p", { class: "muted" }, c.name + " · " + c.type + " · " + c.size.toLocaleString() + " bytes · SHA256 " + c.sha256 + (d.password_used ? " · 패스워드 ZIP 해제됨" : "")),
+      (d.warnings || []).length ? el("div", { class: "error" }, d.warnings.join("\n")) : "",
+      el("table", {}, el("tr", {}, ["파일", "형식", "판정", "주요 탐지"].map(h => el("th", {}, h))),
+        d.files.map(f => el("tr", { class: f.level === "HIGH" ? "risky" : "" }, el("td", { class: "desc" }, f.name), el("td", {}, f.type),
+          el("td", {}, el("span", { class: "badge v " + sampleClass(f.verdict) }, f.verdict + " " + f.score)),
+          el("td", { class: "desc" }, f.findings.slice(0, 4).map(x => x.name).join(", ") || "-")))),
+      el("h3", {}, "탐지 항목"),
+      ...d.files.filter(f => f.findings.length).map(f => el("div", {}, el("b", {}, f.name),
+        el("ul", { class: "summary" }, f.findings.map(x => el("li", {}, "[" + x.weight + "] " + x.name + (x.technique ? " (" + x.technique + ")" : "") + " — " + (x.evidence[0] || "")))))),
+      el("p", { class: "muted" }, "※ " + (s.disclaimer || "")));
+  } else if (sampleTab === "files") body = el("div", {}, d.files.map(renderSampleFile));
+  else if (sampleTab === "strings") {
+    body = el("div", {}, d.files.map(f => el("div", { style: "margin-bottom:20px" }, el("h3", {}, f.name + " (문자열 " + f.string_count.toLocaleString() + "개)"),
+      ...Object.entries(f.iocs || {}).map(([k, v]) => el("p", {}, el("div", { class: "muted" }, SAMPLE_IOC[k] || k), el("div", { class: "ioc" }, v.map(x => el("span", {}, x))))),
+      el("div", { class: "muted" }, "주요 문자열"), el("div", { class: "note", style: "max-height:320px;overflow:auto" }, (f.strings_sample || []).join("\n") || "-"))));
+  } else if (sampleTab === "report") body = renderDoc(d.report);
+  else {
+    const text = JSON.stringify(d, null, 2);
+    body = el("div", {}, el("div", { class: "row", style: "margin-bottom:10px" },
+      el("button", { class: "btn", onclick: () => {
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+        const link = el("a", { href: url, download: "sample_" + d.id + ".json" });
+        document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, "JSON 다운로드")), el("div", { class: "note", style: "max-height:520px;overflow:auto" }, text));
+  }
+  box.replaceChildren(el("div", { class: "tabs" }, tabs.map(([k, label]) => el("button", { class: k === sampleTab ? "on" : "", onclick: () => { sampleTab = k; renderSample(); } }, label))), body);
 }
 
 document.querySelectorAll(".chip").forEach(c => c.onclick = () => {

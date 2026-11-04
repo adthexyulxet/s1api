@@ -91,6 +91,25 @@ class ReportStore:
             return None
         return self._load(self.dir / f"analysis_{threat_id}.json")
 
+    def list_samples(self, limit: int = 30) -> List[Dict[str, Any]]:
+        if not self.dir.is_dir():
+            return []
+        items = []
+        for path in self.dir.glob("sample_*.json"):
+            data = self._load(path)
+            if data:
+                c, s = data.get("container") or {}, data.get("summary") or {}
+                items.append({"id": data.get("id"), "name": c.get("name"), "type": c.get("type"),
+                              "file_count": s.get("file_count"), "verdict": s.get("verdict"),
+                              "score": s.get("score"), "analyzed_at": data.get("analyzed_at")})
+        items.sort(key=lambda r: r.get("analyzed_at") or "", reverse=True)
+        return items[:limit]
+
+    def get_sample(self, sample_id: str) -> Optional[Dict[str, Any]]:
+        if not SAFE_ID.match(sample_id):
+            return None
+        return self._load(self.dir / f"sample_{sample_id}.json")
+
 
 def summarize(data: Dict[str, Any]) -> Dict[str, Any]:
     t = data.get("threat") or {}
@@ -151,6 +170,7 @@ def saved_threat_rows(store: "ReportStore") -> List[Dict[str, Any]]:
 
 
 def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None):
+    settings = getattr(jobs, "settings", None)
     index_html = (STATIC_DIR / "index.html").read_bytes()
     client_holder: Dict[str, Any] = {}
 
@@ -221,6 +241,15 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
                 if data is None:
                     return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                 return self._json(data)
+            if path == "/api/samples":
+                return self._json({"default_password": os.environ.get("SAMPLE_ZIP_PASSWORD") or "infected",
+                                   "can_ti": bool(settings and settings.vt_api_key),
+                                   "items": store.list_samples()})
+            if path.startswith("/api/samples/"):
+                data = store.get_sample(path[len("/api/samples/"):])
+                if data is None:
+                    return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return self._json(data)
             if path.startswith("/api/jobs/") and jobs:
                 job = jobs.get(path[len("/api/jobs/"):])
                 if job is None:
@@ -236,8 +265,40 @@ def make_handler(store: ReportStore, status: Optional[Dict[str, Any]], jobs=None
             host = self.headers.get("Host", "")
             return origin is None or origin in (f"http://{host}", f"https://{host}")
 
+        def _sample(self):
+            from .enrichment import Enricher
+            from .sample import MAX_UPLOAD, SampleError, analyze_upload
+
+            if not self._same_origin():
+                return self._json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_UPLOAD:
+                self.close_connection = True
+                return self._json({"error": f"업로드 최대 크기는 {MAX_UPLOAD // 1024 // 1024}MB 입니다."},
+                                  HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            data = self.rfile.read(length) if length > 0 else b""
+            query = parse_qs(urlparse(self.path).query)
+            name = Path(unquote(self.headers.get("X-Filename") or "upload.bin")).name[:200] or "upload.bin"
+            password = unquote(self.headers.get("X-Zip-Password") or "")
+            use_ti = (query.get("use_ti") or ["0"])[0] == "1"
+            try:
+                timeout = int((query.get("timeout") or ["300"])[0])
+            except ValueError:
+                timeout = 300
+            enricher = Enricher(settings) if use_ti and settings and settings.vt_api_key else None
+            try:
+                result = analyze_upload(data, name, password, time_limit=max(10, min(timeout, 1800)), enricher=enricher)
+            except SampleError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            store.dir.mkdir(parents=True, exist_ok=True)
+            (store.dir / f"sample_{result['id']}.json").write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            return self._json(result)
+
         def do_POST(self):
             path = urlparse(self.path).path
+            if path == "/api/sample":
+                return self._sample()
             if path != "/api/analyze" or not jobs:
                 return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             if not self._same_origin():
